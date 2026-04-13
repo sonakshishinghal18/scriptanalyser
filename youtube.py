@@ -80,11 +80,11 @@ def _parse_video_ids(html: str, limit: int) -> list[str]:
     return seen
 
 
-def fetch_transcript(video_id: str, max_chars: int = 3000) -> str | None:
+def fetch_transcript(video_id: str, max_chars: int = 3000) -> tuple[str | None, bool]:
     """
     Try youtube-transcript-api first.
-    Fall back to yt-dlp if that fails (handles auto-generated captions).
-    Returns None only if both methods fail.
+    Fall back to yt-dlp if that fails.
+    Returns (text, used_ytdlp) — used_ytdlp is True if fallback was needed.
     """
 
     # ── Method 1: youtube-transcript-api ──────────────────────
@@ -94,21 +94,18 @@ def fetch_transcript(video_id: str, max_chars: int = 3000) -> str | None:
         )
         text = " ".join(s["text"] for s in snippets)
         if text.strip():
-            return text[:max_chars]
+            return text[:max_chars], False
     except (TranscriptsDisabled, NoTranscriptFound):
         pass
     except Exception:
         pass
 
     # ── Method 2: yt-dlp fallback ─────────────────────────────
-    return _fetch_via_ytdlp(video_id, max_chars)
+    text = _fetch_via_ytdlp(video_id, max_chars)
+    return text, True
 
 
 def _fetch_via_ytdlp(video_id: str, max_chars: int = 3000) -> str | None:
-    """
-    Use yt-dlp to extract auto-generated or manual subtitles.
-    Works even when youtube-transcript-api fails.
-    """
     try:
         import yt_dlp
 
@@ -125,23 +122,18 @@ def _fetch_via_ytdlp(video_id: str, max_chars: int = 3000) -> str | None:
             }
 
             url = f"https://www.youtube.com/watch?v={video_id}"
-
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
-            # Find the downloaded subtitle file
             for fname in os.listdir(tmpdir):
                 if fname.endswith(".json3"):
-                    fpath = os.path.join(tmpdir, fname)
-                    text = _parse_json3_subtitles(fpath)
+                    text = _parse_json3_subtitles(os.path.join(tmpdir, fname))
                     if text:
                         return text[:max_chars]
 
-            # Try .vtt if json3 not found
             for fname in os.listdir(tmpdir):
                 if fname.endswith(".vtt"):
-                    fpath = os.path.join(tmpdir, fname)
-                    text = _parse_vtt(fpath)
+                    text = _parse_vtt(os.path.join(tmpdir, fname))
                     if text:
                         return text[:max_chars]
 
@@ -152,7 +144,6 @@ def _fetch_via_ytdlp(video_id: str, max_chars: int = 3000) -> str | None:
 
 
 def _parse_json3_subtitles(filepath: str) -> str:
-    """Parse yt-dlp json3 subtitle format into plain text."""
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -168,11 +159,9 @@ def _parse_json3_subtitles(filepath: str) -> str:
 
 
 def _parse_vtt(filepath: str) -> str:
-    """Parse WebVTT subtitle file into plain text."""
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
-        # Remove VTT header, timestamps, and tags
         lines = content.split("\n")
         text_lines = []
         for line in lines:
@@ -185,11 +174,9 @@ def _parse_vtt(filepath: str) -> str:
                 continue
             if re.match(r"^\d+$", line):
                 continue
-            # Remove HTML tags
             line = re.sub(r"<[^>]+>", "", line)
             if line:
                 text_lines.append(line)
-        # Deduplicate consecutive identical lines (common in VTT)
         deduped = []
         for line in text_lines:
             if not deduped or line != deduped[-1]:
