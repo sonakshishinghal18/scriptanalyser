@@ -240,6 +240,10 @@ $('generate-btn').addEventListener('click', async () => {
    GENERATE PAGE
 ═══════════════════════════════════════════════════════════ */
 async function runGenerate() {
+  // Timeout — 2 minutes max
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2 * 60 * 1000);
+
   try {
     const res = await fetch(`${API}/api/generate`, {
       method: 'POST',
@@ -249,31 +253,47 @@ async function runGenerate() {
         length:   state.selectedLength,
         analysis: state.analysis,
       }),
+      signal: controller.signal,
     });
 
     if (!res.ok) throw new Error(`Server error ${res.status}`);
 
-    const data = await res.json();
+    // Stream the script word by word as it arrives
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let script = '';
 
-    // Validate the response has actual content
-    if (!data || !data.script || data.script.trim().length < 50) {
-      throw new Error(
-        data?.error || 
-        "Couldn't generate a script — the video transcript may be too short or unavailable."
-      );
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      script += decoder.decode(value, { stream: true });
+
+      // Update UI in real time as chunks arrive
+      setState(prev => ({ ...prev, script, isStreaming: true }));
     }
 
-    // Success — proceed with data.script
-    setState(prev => ({ ...prev, script: data.script }));
+    // Validate final result
+    if (!script || script.trim().length < 50) {
+      throw new Error("Couldn't generate a script — please try a different topic.");
+    }
+
+    setState(prev => ({ ...prev, script, isStreaming: false }));
 
   } catch (err) {
-    // Show user-friendly error instead of raw message
-    setState(prev => ({
-      ...prev,
-      error: err.message.includes('Server error')
-        ? 'Something went wrong on our end. Please try again.'
-        : err.message,
-    }));
+    let msg = 'Something went wrong. Please try again.';
+    if (err.name === 'AbortError') {
+      msg = 'Script generation timed out. Try a shorter length or different topic.';
+    } else if (err.message.includes('Server error')) {
+      msg = 'Something went wrong on our end. Please try again.';
+    } else if (err.message.includes('Failed to fetch') || err.message.includes('Load failed')) {
+      msg = 'Connection lost. Check your internet and try again.';
+    } else {
+      msg = err.message;
+    }
+    setState(prev => ({ ...prev, error: msg, isStreaming: false }));
+  } finally {
+    clearTimeout(timeout);
   }
 }
 /* ═══════════════════════════════════════════════════════════
