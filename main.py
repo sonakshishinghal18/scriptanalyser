@@ -33,7 +33,7 @@ app.add_middleware(
 )
 
 # ── Serve frontend static files ───────────────────────────────────────────────
-FRONTEND_DIR = Path(__file__).parent / "frontend"
+FRONTEND_DIR = Path(__file__).parent
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
