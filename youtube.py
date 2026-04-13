@@ -103,8 +103,20 @@ def fetch_transcript(video_id: str, max_chars: int = 3000) -> tuple[str | None, 
         proxy_url = f"http://scraperapi:{scraper_key}@proxy-server.scraperapi.com:8001"
         proxies = {"http": proxy_url, "https": proxy_url}
 
+   def fetch_transcript(video_id: str, max_chars: int = 3000) -> tuple[str | None, bool]:
+    scraper_key = os.getenv("SCRAPER_API_KEY")
+
     try:
-        ytt = YouTubeTranscriptApi(proxies=proxies)
+        if scraper_key:
+            proxy_url = f"http://scraperapi:{scraper_key}@proxy-server.scraperapi.com:8001"
+            import requests
+            session = requests.Session()
+            session.proxies = {"http": proxy_url, "https": proxy_url}
+            session.verify = False
+            ytt = YouTubeTranscriptApi(http_client=session)
+        else:
+            ytt = YouTubeTranscriptApi()
+
         snippet_list = ytt.fetch(video_id, languages=["en", "en-US", "en-GB"])
         text = " ".join(s.get("text", "") for s in snippet_list)
         if text.strip():
