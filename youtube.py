@@ -10,6 +10,7 @@ import httpx
 import tempfile
 import os
 import json
+import sys
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
 
@@ -95,14 +96,20 @@ def fetch_transcript(video_id: str, max_chars: int = 3000) -> tuple[str | None, 
         text = " ".join(s["text"] for s in snippets)
         if text.strip():
             return text[:max_chars], False
-    except (TranscriptsDisabled, NoTranscriptFound):
-        pass
-    except Exception:
-        pass
+    except Exception as e1:
+        print(f"[transcript-api] {video_id} failed: {e1}", file=sys.stderr)
 
     # ── Method 2: yt-dlp fallback ─────────────────────────────
-    text = _fetch_via_ytdlp(video_id, max_chars)
-    return text, True
+    try:
+        text = _fetch_via_ytdlp(video_id, max_chars)
+        if text:
+            return text, True
+        else:
+            print(f"[yt-dlp] {video_id} returned empty", file=sys.stderr)
+    except Exception as e2:
+        print(f"[yt-dlp] {video_id} failed: {e2}", file=sys.stderr)
+
+    return None, True
 
 
 def _fetch_via_ytdlp(video_id: str, max_chars: int = 3000) -> str | None:
@@ -125,20 +132,23 @@ def _fetch_via_ytdlp(video_id: str, max_chars: int = 3000) -> str | None:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
-            for fname in os.listdir(tmpdir):
+            files = os.listdir(tmpdir)
+            print(f"[yt-dlp] {video_id} downloaded files: {files}", file=sys.stderr)
+
+            for fname in files:
                 if fname.endswith(".json3"):
                     text = _parse_json3_subtitles(os.path.join(tmpdir, fname))
                     if text:
                         return text[:max_chars]
 
-            for fname in os.listdir(tmpdir):
+            for fname in files:
                 if fname.endswith(".vtt"):
                     text = _parse_vtt(os.path.join(tmpdir, fname))
                     if text:
                         return text[:max_chars]
 
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[yt-dlp] exception for {video_id}: {e}", file=sys.stderr)
 
     return None
 
