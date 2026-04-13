@@ -101,10 +101,9 @@ def fetch_transcript(video_id: str, max_chars: int = 3000) -> tuple[str | None, 
     Returns (text, used_fallback).
     """
     try:
-        snippets = YouTubeTranscriptApi.get_transcript(
-            video_id, languages=["en", "en-US", "en-GB"]
-        )
-        text = " ".join(s["text"] for s in snippets)
+        ytt = YouTubeTranscriptApi()
+        snippet_list = ytt.fetch(video_id, languages=["en", "en-US", "en-GB"])
+        text = " ".join(s.get("text", "") for s in snippet_list)
         if text.strip():
             print(f"[transcript] {video_id} OK ({len(text)} chars)", file=sys.stderr)
             return text[:max_chars], False
