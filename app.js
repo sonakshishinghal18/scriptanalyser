@@ -116,10 +116,15 @@ async function runAnalysis() {
 
     if (!res.ok) throw new Error(`Server error ${res.status}`);
 
-    const data = await readSSE(res, (msg, step) => {
-      $('analyse-status').textContent = msg;
-      if (step) setAnalyseStep(step);
-    });
+    const data = await readSSE(res, (msg, type) => {
+    if (type === 'chunk') {
+      // Show live typing progress
+      $('generate-status').textContent = 'Writing your script...';
+    }
+    if (type === 'status') {
+      $('generate-status').textContent = msg;
+    }
+  });
 
     // Validate we actually got analysis data back
     if (!data || !data.analysis) {
