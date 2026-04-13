@@ -102,12 +102,18 @@ async function runAnalysis() {
   setAnalyseStep(1);
   $('analyse-error').classList.add('hidden');
 
+  // Timeout controller — 3 minutes max
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3 * 60 * 1000);
+
   try {
     const res = await fetch(`${API}/api/analyse`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channelUrl: state.channelUrl }),
+      signal: controller.signal,
     });
+
     if (!res.ok) throw new Error(`Server error ${res.status}`);
 
     const data = await readSSE(res, (msg, step) => {
@@ -115,19 +121,35 @@ async function runAnalysis() {
       if (step) setAnalyseStep(step);
     });
 
-    // Mark all steps done
+    // Validate we actually got analysis data back
+    if (!data || !data.analysis) {
+      throw new Error('No analysis data received. Please try again.');
+    }
+
     setAnalyseStep(TOTAL_STEPS + 1);
     $('progress-fill').style.width = '100%';
-
     state.analysis = data.analysis;
     renderTopicsPage(data.analysis);
     showPage('topics');
+
   } catch (err) {
-    $('analyse-error-msg').textContent = err.message;
+    // User-friendly error messages
+    let msg = 'Something went wrong. Please try again.';
+    if (err.name === 'AbortError') {
+      msg = 'This is taking too long. Please try again or use a channel with fewer videos.';
+    } else if (err.message.includes('Server error 5')) {
+      msg = 'Server error. Please try again in a moment.';
+    } else if (err.message.includes('Failed to fetch') || err.message.includes('Load failed')) {
+      msg = 'Connection lost. Check your internet and try again.';
+    } else {
+      msg = err.message;
+    }
+    $('analyse-error-msg').textContent = msg;
     $('analyse-error').classList.remove('hidden');
+  } finally {
+    clearTimeout(timeout);
   }
 }
-
 $('analyse-back-btn').addEventListener('click', () => showPage('landing'));
 
 /* ═══════════════════════════════════════════════════════════
