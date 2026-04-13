@@ -1,15 +1,18 @@
 """
 ScriptForge — FastAPI backend
 All LLM calls use claude-sonnet-4-5.
+Frontend (HTML/CSS/JS) is served directly from this same service.
 """
 
 import json
 import os
 import asyncio
+from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import anthropic
 
@@ -20,15 +23,35 @@ load_dotenv()
 app = FastAPI(title="ScriptForge API")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "*")
 MODEL = "claude-sonnet-4-5"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:5500", "http://127.0.0.1:5500", "*"],
+    allow_origins=["*"],
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type"],
 )
+
+# ── Serve frontend static files ───────────────────────────────────────────────
+FRONTEND_DIR = Path(__file__).parent / "frontend"
+if FRONTEND_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+
+    @app.get("/")
+    def serve_index():
+        return FileResponse(str(FRONTEND_DIR / "index.html"))
+
+    @app.get("/app.js")
+    def serve_appjs():
+        return FileResponse(str(FRONTEND_DIR / "app.js"))
+
+    @app.get("/style.css")
+    def serve_css():
+        return FileResponse(str(FRONTEND_DIR / "style.css"))
+
+    @app.get("/config.js")
+    def serve_config():
+        return FileResponse(str(FRONTEND_DIR / "config.js"))
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -38,7 +61,7 @@ class AnalyseRequest(BaseModel):
 
 class GenerateRequest(BaseModel):
     topic: str
-    length: str          # "short" | "medium" | "long"
+    length: str
     analysis: dict
 
 
@@ -46,7 +69,6 @@ class GenerateRequest(BaseModel):
 
 def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
-
 
 def make_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -61,16 +83,11 @@ def health():
 
 @app.post("/api/analyse")
 async def analyse(req: AnalyseRequest):
-    """
-    Step 1: scrape transcripts → analyse creator voice → return SSE stream.
-    """
-
     async def generate():
         channel_url = req.channelUrl.strip()
         transcripts: list[str] = []
         handle = ""
 
-        # 1. Fetch video IDs
         yield sse("status", {"message": "Resolving channel...", "step": 1})
         try:
             video_ids, handle = await get_channel_video_ids(channel_url, max_videos=10)
@@ -81,7 +98,6 @@ async def analyse(req: AnalyseRequest):
             from youtube import extract_handle
             handle = extract_handle(channel_url)
 
-        # 2. Fetch transcripts (run in thread pool to keep async loop free)
         fetched = 0
         for vid in video_ids:
             text = await asyncio.to_thread(fetch_transcript, vid)
@@ -90,7 +106,6 @@ async def analyse(req: AnalyseRequest):
                 fetched += 1
                 yield sse("status", {"message": f"Reading transcripts... ({fetched}/{len(video_ids)})", "step": 2})
 
-        # 3. Build prompt
         yield sse("status", {"message": "Analysing voice, tone, and patterns...", "step": 3})
 
         if transcripts:
@@ -136,7 +151,6 @@ Return ONLY this exact JSON (no markdown fences):
   ]
 }}"""
 
-        # 4. Call Claude
         client = make_client()
         message = client.messages.create(
             model=MODEL,
@@ -156,15 +170,11 @@ Return ONLY this exact JSON (no markdown fences):
 
 @app.post("/api/generate")
 async def generate_script(req: GenerateRequest):
-    """
-    Step 2: write a full script in the creator's voice → SSE stream.
-    """
-
     async def stream():
         length_map = {
-            "short":  {"words": "650–750 words",   "duration": "~5 minutes",  "detail": "punchy and tight"},
-            "medium": {"words": "1400–1600 words",  "duration": "~10 minutes", "detail": "balanced depth and pace"},
-            "long":   {"words": "2800–3200 words",  "duration": "~20 minutes", "detail": "comprehensive with examples and deep dives"},
+            "short":  {"words": "650-750 words",   "duration": "~5 minutes",  "detail": "punchy and tight"},
+            "medium": {"words": "1400-1600 words",  "duration": "~10 minutes", "detail": "balanced depth and pace"},
+            "long":   {"words": "2800-3200 words",  "duration": "~20 minutes", "detail": "comprehensive with examples and deep dives"},
         }
         target = length_map.get(req.length, length_map["medium"])
         a = req.analysis
