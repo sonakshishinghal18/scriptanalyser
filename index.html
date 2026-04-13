@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ScriptForge — Write in your voice</title>
+  <meta name="description" content="Generate video scripts that sound exactly like you." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ── PAGE: LANDING ─────────────────────────────────────── -->
+  <div id="page-landing" class="page active">
+    <div class="landing-glow"></div>
+    <div class="landing-inner">
+      <div class="badge fade-up">
+        <span class="badge-dot"></span>
+        Script intelligence
+      </div>
+      <h1 class="headline fade-up delay-1">
+        Your voice.<br>
+        <em class="accent-text">Every script.</em>
+      </h1>
+      <p class="sub fade-up delay-2">
+        Paste your channel link. We study how you speak, think, and connect —
+        then write your next script like you would.
+      </p>
+      <form class="landing-form fade-up delay-3" id="landing-form">
+        <div class="input-wrap">
+          <span class="input-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 3.993-8 4.007z"/>
+            </svg>
+          </span>
+          <input type="url" id="channel-url" placeholder="youtube.com/@yourchannel" autocomplete="off" />
+        </div>
+        <div id="url-error" class="field-error hidden"></div>
+        <button type="submit" class="btn-primary">
+          Analyse my channel
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </button>
+      </form>
+      <div class="features fade-up delay-4">
+        <span class="feat"><span class="feat-dot"></span>Reads last 10 videos</span>
+        <span class="feat"><span class="feat-dot"></span>Learns your patterns</span>
+        <span class="feat"><span class="feat-dot"></span>Trending topics</span>
+        <span class="feat"><span class="feat-dot"></span>No login required</span>
+      </div>
+    </div>
+    <div class="wordmark">
+      <div class="wm-line"></div>
+      <span>ScriptForge</span>
+      <div class="wm-line"></div>
+    </div>
+  </div>
+
+  <!-- ── PAGE: ANALYSE (loading) ───────────────────────────── -->
+  <div id="page-analyse" class="page">
+    <div class="analyse-inner">
+      <div class="logo-row">
+        <div class="logo-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--accent)">
+            <path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 3.993-8 4.007z"/>
+          </svg>
+        </div>
+        <span class="logo-label">ScriptForge</span>
+      </div>
+      <h2 class="section-title">Studying your <em class="accent-text">channel</em></h2>
+      <p class="status-msg" id="analyse-status">Starting analysis...</p>
+      <div class="steps-list" id="steps-list">
+        <div class="step-item" data-step="1">
+          <div class="step-icon"><div class="step-dot"></div></div>
+          <div class="step-text">
+            <div class="step-label">Resolving channel</div>
+            <div class="step-desc">Looking up your videos</div>
+          </div>
+        </div>
+        <div class="step-item" data-step="2">
+          <div class="step-icon"><div class="step-dot"></div></div>
+          <div class="step-text">
+            <div class="step-label">Reading content</div>
+            <div class="step-desc">Going through your transcripts</div>
+          </div>
+        </div>
+        <div class="step-item" data-step="3">
+          <div class="step-icon"><div class="step-dot"></div></div>
+          <div class="step-text">
+            <div class="step-label">Understanding your voice</div>
+            <div class="step-desc">Mapping tone, rhythm, vocabulary</div>
+          </div>
+        </div>
+        <div class="step-item" data-step="4">
+          <div class="step-icon"><div class="step-dot"></div></div>
+          <div class="step-text">
+            <div class="step-label">Finding relevant topics</div>
+            <div class="step-desc">What your audience wants next</div>
+          </div>
+        </div>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+      <div id="analyse-error" class="error-block hidden">
+        <p id="analyse-error-msg"></p>
+        <button class="btn-ghost" id="analyse-back-btn">← Try a different channel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PAGE: TOPICS ──────────────────────────────────────── -->
+  <div id="page-topics" class="page">
+    <div class="topics-inner">
+      <button class="back-link" id="topics-back-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        New channel
+      </button>
+
+      <!-- Analysis summary card -->
+      <div class="card fade-up" id="analysis-card">
+        <div class="metrics-row" id="metrics-row"></div>
+        <p class="voice-summary" id="voice-summary"></p>
+        <div class="tag-row" id="tag-row"></div>
+      </div>
+
+      <!-- Topic suggestions -->
+      <div class="section-label fade-up delay-1">Suggested topics</div>
+      <div class="topics-list" id="topics-list"></div>
+
+      <!-- Custom topic -->
+      <div class="divider fade-up delay-2">
+        <div class="div-line"></div>
+        <span>or enter your own</span>
+        <div class="div-line"></div>
+      </div>
+      <input type="text" id="custom-topic" placeholder="e.g. Why I quit my 9-to-5 to do this full time" class="fade-up delay-2" />
+
+      <!-- Length -->
+      <div class="section-label fade-up delay-3">Script length</div>
+      <div class="length-row fade-up delay-3" id="length-row">
+        <button class="length-opt" data-length="short">
+          <span class="length-name">Short</span>
+          <span class="length-meta">~700 words</span>
+          <span class="length-meta">5 min</span>
+        </button>
+        <button class="length-opt selected" data-length="medium">
+          <span class="length-name">Medium</span>
+          <span class="length-meta">~1,500 words</span>
+          <span class="length-meta">10 min</span>
+        </button>
+        <button class="length-opt" data-length="long">
+          <span class="length-name">Long</span>
+          <span class="length-meta">~3,000 words</span>
+          <span class="length-meta">20 min</span>
+        </button>
+      </div>
+
+      <div id="topics-error" class="field-error hidden"></div>
+      <button class="btn-primary full-width fade-up delay-4" id="generate-btn">
+        Write this script
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── PAGE: GENERATING (loading) ───────────────────────── -->
+  <div id="page-generating" class="page">
+    <div class="analyse-inner">
+      <div class="spinner-wrap">
+        <div class="spinner"></div>
+      </div>
+      <h2 class="section-title">Writing your <em class="accent-text">script</em></h2>
+      <p class="status-msg" id="gen-status">Crafting in your voice...</p>
+    </div>
+  </div>
+
+  <!-- ── PAGE: SCRIPT ──────────────────────────────────────── -->
+  <div id="page-script" class="page">
+    <div class="script-inner">
+      <div class="script-nav">
+        <button class="back-link" id="script-back-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          Change topic
+        </button>
+        <div class="script-actions">
+          <button class="btn-ghost small" id="reset-btn">New channel</button>
+          <button class="btn-ghost small" id="copy-all-btn">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            Copy all
+          </button>
+        </div>
+      </div>
+
+      <div class="script-header fade-up">
+        <div class="section-label">Your script</div>
+        <h1 class="script-title" id="script-title"></h1>
+        <div class="script-meta" id="script-meta"></div>
+      </div>
+
+      <div id="script-sections"></div>
+
+      <div class="script-footer">
+        <button class="back-link muted" id="start-over-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/></svg>
+          Start over with a new channel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
