@@ -96,12 +96,15 @@ async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple
 
 
 def fetch_transcript(video_id: str, max_chars: int = 3000) -> tuple[str | None, bool]:
-    """
-    Fetch transcript using youtube-transcript-api.
-    Returns (text, used_fallback).
-    """
+    scraper_key = os.getenv("SCRAPER_API_KEY")
+
+    proxies = None
+    if scraper_key:
+        proxy_url = f"http://scraperapi:{scraper_key}@proxy-server.scraperapi.com:8001"
+        proxies = {"http": proxy_url, "https": proxy_url}
+
     try:
-        ytt = YouTubeTranscriptApi()
+        ytt = YouTubeTranscriptApi(proxies=proxies)
         snippet_list = ytt.fetch(video_id, languages=["en", "en-US", "en-GB"])
         text = " ".join(s.get("text", "") for s in snippet_list)
         if text.strip():
