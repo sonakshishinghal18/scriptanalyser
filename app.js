@@ -228,20 +228,32 @@ async function runGenerate() {
         analysis: state.analysis,
       }),
     });
+
     if (!res.ok) throw new Error(`Server error ${res.status}`);
 
-    const data = await readSSE(res, (msg) => {
-      $('gen-status').textContent = msg;
-    });
+    const data = await res.json();
 
-    state.script = data.script;
-    renderScriptPage(data.script);
-    showPage('script');
+    // Validate the response has actual content
+    if (!data || !data.script || data.script.trim().length < 50) {
+      throw new Error(
+        data?.error || 
+        "Couldn't generate a script — the video transcript may be too short or unavailable."
+      );
+    }
+
+    // Success — proceed with data.script
+    setState(prev => ({ ...prev, script: data.script }));
+
   } catch (err) {
-    $('gen-status').textContent = `Error: ${err.message}`;
+    // Show user-friendly error instead of raw message
+    setState(prev => ({
+      ...prev,
+      error: err.message.includes('Server error')
+        ? 'Something went wrong on our end. Please try again.'
+        : err.message,
+    }));
   }
 }
-
 /* ═══════════════════════════════════════════════════════════
    SCRIPT PAGE
 ═══════════════════════════════════════════════════════════ */
