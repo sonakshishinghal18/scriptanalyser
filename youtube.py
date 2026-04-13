@@ -1,17 +1,19 @@
 """
 YouTube utilities — uses YouTube Data API v3 for video IDs,
-youtube-transcript-api for transcripts.
+youtube-transcript-api + ScraperAPI proxy for transcripts.
 """
 
 import re
 import os
 import sys
+import requests
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
 from googleapiclient.discovery import build
 
 
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
+SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY", "")
 
 
 def extract_handle(url: str) -> str:
@@ -30,16 +32,13 @@ def extract_handle(url: str) -> str:
 
 async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple[list[str], str]:
     handle = extract_handle(channel_url)
-
     youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
-    # Step 1 — resolve channel ID
     channel_id = None
 
     if handle.startswith("UC"):
         channel_id = handle
     else:
-        # Try forHandle lookup (works for @handles)
         try:
             h = handle.lstrip("@")
             res = youtube.channels().list(
@@ -52,7 +51,6 @@ async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple
             print(f"[api] forHandle lookup failed: {e}", file=sys.stderr)
 
     if not channel_id:
-        # Fallback: search for channel
         try:
             res = youtube.search().list(
                 part="snippet",
@@ -68,7 +66,6 @@ async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple
     if not channel_id:
         raise ValueError(f"Could not resolve channel ID for: {handle}")
 
-    # Step 2 — get uploads playlist ID
     ch_res = youtube.channels().list(
         part="contentDetails",
         id=channel_id
@@ -79,7 +76,6 @@ async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple
 
     uploads_playlist = ch_res["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-    # Step 3 — fetch latest video IDs from uploads playlist
     pl_res = youtube.playlistItems().list(
         part="contentDetails",
         playlistId=uploads_playlist,
@@ -96,20 +92,9 @@ async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple
 
 
 def fetch_transcript(video_id: str, max_chars: int = 3000) -> tuple[str | None, bool]:
-    scraper_key = os.getenv("SCRAPER_API_KEY")
-
-    proxies = None
-    if scraper_key:
-        proxy_url = f"http://scraperapi:{scraper_key}@proxy-server.scraperapi.com:8001"
-        proxies = {"http": proxy_url, "https": proxy_url}
-
-   def fetch_transcript(video_id: str, max_chars: int = 3000) -> tuple[str | None, bool]:
-    scraper_key = os.getenv("SCRAPER_API_KEY")
-
     try:
-        if scraper_key:
-            proxy_url = f"http://scraperapi:{scraper_key}@proxy-server.scraperapi.com:8001"
-            import requests
+        if SCRAPER_API_KEY:
+            proxy_url = f"http://scraperapi:{SCRAPER_API_KEY}@proxy-server.scraperapi.com:8001"
             session = requests.Session()
             session.proxies = {"http": proxy_url, "https": proxy_url}
             session.verify = False
