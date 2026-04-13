@@ -1,16 +1,20 @@
 """
 YouTube utilities — scrape channel video IDs and fetch transcripts.
+Primary: youtube-transcript-api
+Fallback: yt-dlp (handles auto-generated captions, works when transcripts are off)
 No API key required.
 """
 
 import re
 import httpx
+import tempfile
+import os
+import json
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
 
 
 def extract_handle(url: str) -> str:
-    """Pull the channel handle / ID from a YouTube URL."""
     patterns = [
         r"youtube\.com/@([\w.-]+)",
         r"youtube\.com/c/([\w.-]+)",
@@ -21,19 +25,14 @@ def extract_handle(url: str) -> str:
         m = re.search(p, url)
         if m:
             return m.group(1)
-    # fallback — last path segment
     return url.rstrip("/").split("/")[-1]
 
 
 async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple[list[str], str]:
-    """
-    Scrape up to `max_videos` video IDs from a channel's /videos page.
-    Returns (video_ids, handle).
-    """
     handle = extract_handle(channel_url)
 
     candidates = []
-    if handle.startswith("UC"):  # channel ID
+    if handle.startswith("UC"):
         candidates.append(f"https://www.youtube.com/channel/{handle}/videos")
     else:
         h = handle.lstrip("@")
@@ -65,7 +64,6 @@ async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple
 
 
 def _parse_video_ids(html: str, limit: int) -> list[str]:
-    """Extract video IDs from raw YouTube HTML."""
     seen: list[str] = []
     added: set[str] = set()
     for pattern in [
@@ -84,14 +82,118 @@ def _parse_video_ids(html: str, limit: int) -> list[str]:
 
 def fetch_transcript(video_id: str, max_chars: int = 3000) -> str | None:
     """
-    Fetch transcript text for a single video.
-    Returns None if unavailable.
+    Try youtube-transcript-api first.
+    Fall back to yt-dlp if that fails (handles auto-generated captions).
+    Returns None only if both methods fail.
+    """
+
+    # ── Method 1: youtube-transcript-api ──────────────────────
+    try:
+        snippets = YouTubeTranscriptApi.get_transcript(
+            video_id, languages=["en", "en-US", "en-GB"]
+        )
+        text = " ".join(s["text"] for s in snippets)
+        if text.strip():
+            return text[:max_chars]
+    except (TranscriptsDisabled, NoTranscriptFound):
+        pass
+    except Exception:
+        pass
+
+    # ── Method 2: yt-dlp fallback ─────────────────────────────
+    return _fetch_via_ytdlp(video_id, max_chars)
+
+
+def _fetch_via_ytdlp(video_id: str, max_chars: int = 3000) -> str | None:
+    """
+    Use yt-dlp to extract auto-generated or manual subtitles.
+    Works even when youtube-transcript-api fails.
     """
     try:
-        snippets = YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US", "en-GB"])
-        text = " ".join(s["text"] for s in snippets)
-        return text[:max_chars]
-    except (TranscriptsDisabled, NoTranscriptFound):
-        return None
+        import yt_dlp
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ydl_opts = {
+                "skip_download": True,
+                "writesubtitles": True,
+                "writeautomaticsub": True,
+                "subtitleslangs": ["en", "en-US", "en-GB"],
+                "subtitlesformat": "json3",
+                "outtmpl": os.path.join(tmpdir, "%(id)s.%(ext)s"),
+                "quiet": True,
+                "no_warnings": True,
+            }
+
+            url = f"https://www.youtube.com/watch?v={video_id}"
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+
+            # Find the downloaded subtitle file
+            for fname in os.listdir(tmpdir):
+                if fname.endswith(".json3"):
+                    fpath = os.path.join(tmpdir, fname)
+                    text = _parse_json3_subtitles(fpath)
+                    if text:
+                        return text[:max_chars]
+
+            # Try .vtt if json3 not found
+            for fname in os.listdir(tmpdir):
+                if fname.endswith(".vtt"):
+                    fpath = os.path.join(tmpdir, fname)
+                    text = _parse_vtt(fpath)
+                    if text:
+                        return text[:max_chars]
+
     except Exception:
-        return None
+        pass
+
+    return None
+
+
+def _parse_json3_subtitles(filepath: str) -> str:
+    """Parse yt-dlp json3 subtitle format into plain text."""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        words = []
+        for event in data.get("events", []):
+            for seg in event.get("segs", []):
+                t = seg.get("utf8", "").strip()
+                if t and t != "\n":
+                    words.append(t)
+        return " ".join(words).strip()
+    except Exception:
+        return ""
+
+
+def _parse_vtt(filepath: str) -> str:
+    """Parse WebVTT subtitle file into plain text."""
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+        # Remove VTT header, timestamps, and tags
+        lines = content.split("\n")
+        text_lines = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("WEBVTT") or line.startswith("NOTE"):
+                continue
+            if re.match(r"[\d:.]+ --> [\d:.]+", line):
+                continue
+            if re.match(r"^\d+$", line):
+                continue
+            # Remove HTML tags
+            line = re.sub(r"<[^>]+>", "", line)
+            if line:
+                text_lines.append(line)
+        # Deduplicate consecutive identical lines (common in VTT)
+        deduped = []
+        for line in text_lines:
+            if not deduped or line != deduped[-1]:
+                deduped.append(line)
+        return " ".join(deduped).strip()
+    except Exception:
+        return ""
