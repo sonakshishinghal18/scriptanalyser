@@ -11,4 +11,4 @@
  * set API_URL to your backend's full URL, e.g.:
  *   window.API_URL = 'https://scriptforge-backend.onrender.com';
  */
-window.API_URL = '';   // ← Replace with your backend URL before deploying
+window.API_URL = 'https://scriptanalyser.onrender.com';   // ← Replace with your backend URL before deploying
