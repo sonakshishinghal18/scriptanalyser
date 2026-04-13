@@ -227,17 +227,24 @@ Return ONLY this JSON:
 }}"""
 
         client = make_client()
-        message = client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            system=system,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        with client.messages.stream(
+        model=MODEL,
+        max_tokens=4096,
+        system=system,
+        messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            raw = ""
+            for text in stream.text_stream:
+                raw += text
+                # Optional: send progress chunks to frontend
+                yield sse("chunk", {"text": text})
 
-        raw = "".join(b.text for b in message.content if b.type == "text")
+        # Once complete, parse and send final structured result
         clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        script = json.loads(clean)
-
-        yield sse("complete", {"script": script})
+        try:
+            script = json.loads(clean)
+            yield sse("complete", {"script": script})
+        except json.JSONDecodeError:
+            yield sse("error", {"message": "Failed to parse script. Please try again."})
 
     return StreamingResponse(stream(), media_type="text/event-stream")
