@@ -34,8 +34,7 @@ app.add_middleware(
 
 # ── Serve frontend static files ───────────────────────────────────────────────
 FRONTEND_DIR = Path(__file__).parent
-if FRONTEND_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+if (FRONTEND_DIR / "index.html").exists():
 
     @app.get("/")
     def serve_index():
@@ -93,61 +92,74 @@ async def analyse(req: AnalyseRequest):
             video_ids, handle = await get_channel_video_ids(channel_url, max_videos=10)
             yield sse("status", {"message": f"Found {len(video_ids)} videos. Reading transcripts...", "step": 2})
         except Exception as e:
-            yield sse("status", {"message": f"Could not fetch video list — using channel context. ({e})", "step": 2})
-            video_ids = []
-            from youtube import extract_handle
-            handle = extract_handle(channel_url)
+            yield sse("error", {"message": f"Could not find this channel. Please check the URL and try again. ({e})"})
+            return
 
         fetched = 0
+        ytdlp_triggered = False
         for vid in video_ids:
-            text = await asyncio.to_thread(fetch_transcript, vid)
+            text, used_ytdlp = await asyncio.to_thread(fetch_transcript, vid)
+            if used_ytdlp and not ytdlp_triggered:
+                ytdlp_triggered = True
+                yield sse("status", {"message": "Some videos need extra processing — hang tight...", "step": 2})
             if text:
                 transcripts.append(text)
                 fetched += 1
-                yield sse("status", {"message": f"Reading transcripts... ({fetched}/{len(video_ids)})", "step": 2})
+                if not ytdlp_triggered:
+                    yield sse("status", {"message": f"Reading transcripts... ({fetched}/{len(video_ids)})", "step": 2})
+                else:
+                    yield sse("status", {"message": f"Processing videos... ({fetched}/{len(video_ids)})", "step": 2})
+
+        # Hard stop if no transcripts found
+        if not transcripts:
+            yield sse("error", {"message": "No transcripts found for this channel. Captions appear to be disabled. Please try a channel that has captions enabled — most large creators do."})
+            return
 
         yield sse("status", {"message": "Analysing voice, tone, and patterns...", "step": 3})
 
-        if transcripts:
-            transcript_block = "\n\n---\n\n".join(
-                f"Video {i+1}:\n{t}" for i, t in enumerate(transcripts)
-            )
-            context = f"Here are transcripts from the creator's last {len(transcripts)} videos:\n\n{transcript_block}"
-        else:
-            context = (
-                f"Channel URL: {channel_url}\n"
-                f"Handle: {handle}\n"
-                "No transcripts could be retrieved. "
-                "Infer the creator's style from their channel identity and niche."
-            )
+        transcript_block = "\n\n---\n\n".join(
+            f"Video {i+1}:\n{t}" for i, t in enumerate(transcripts)
+        )
+        context = (
+            f"Here are transcripts from {len(transcripts)} of this creator's recent videos. "
+            f"These transcripts are your ONLY source of truth — analyse them deeply and exclusively.\n\n"
+            f"{transcript_block}"
+        )
 
         yield sse("status", {"message": "Finding trending topics in your niche...", "step": 4})
 
         system = (
-            "You are an expert content strategist who analyses YouTube creators deeply. "
-            "Study vocabulary, sentence rhythm, energy, how they open videos, how they argue, "
-            "their quirks and catchphrases. Always respond with valid JSON only — no markdown, no preamble."
+            "You are an expert content strategist who analyses YouTube creators exclusively from their transcripts. "
+            "You only use what the creator actually says in their videos — never assumptions, never channel descriptions, never niche stereotypes. "
+            "Study their exact vocabulary, sentence length, energy shifts, how they open, how they build arguments, how they close, "
+            "their recurring phrases, filler words, humour style, and unique mannerisms. "
+            "Always respond with valid JSON only — no markdown, no preamble."
         )
 
         prompt = f"""{context}
 
-Analyse this creator and suggest 5 video topics.
+Using ONLY the transcripts above as your source, analyse this creator's voice deeply.
+Focus entirely on how they actually speak — their exact words, sentence structures, catchphrases,
+energy shifts, how they open videos, how they argue points, how they close.
+Do NOT rely on assumptions about their niche, channel name, or anything outside these transcripts.
+
+Suggest 5 video topics that fit their proven content style and audience.
 
 Return ONLY this exact JSON (no markdown fences):
 {{
-  "niche": "max 4 words",
+  "niche": "max 4 words — inferred from transcripts only",
   "tone": "single word",
   "avg_video_length": "e.g. 12 min",
   "posting_pattern": "e.g. Weekly",
   "style_tags": ["tag1", "tag2", "tag3", "tag4"],
-  "voice_summary": "2-3 sentences on how this creator speaks, their energy, vocabulary, signature habits",
-  "writing_guide": "3-4 sentences a ghostwriter must follow to sound exactly like them",
+  "voice_summary": "2-3 sentences describing exactly how this creator speaks based on the transcripts — their energy, vocabulary level, signature habits",
+  "writing_guide": "3-4 specific instructions a ghostwriter must follow to sound exactly like this creator, based on transcript evidence",
   "topics": [
-    {{ "title": "compelling title", "reason": "one sentence why it fits their audience now", "trending": true }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their audience now", "trending": false }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their audience now", "trending": true }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their audience now", "trending": false }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their audience now", "trending": true }}
+    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": true }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": false }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": true }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": false }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": true }}
   ]
 }}"""
 
@@ -184,10 +196,11 @@ async def generate_script(req: GenerateRequest):
         system = (
             "You are a master ghostwriter for YouTube creators. "
             "You write scripts that sound exactly like the creator — their specific words, rhythm, energy, mannerisms. "
+            "You base everything on what you know about how they actually speak from transcript analysis. "
             "Never generic, never corporate. Always valid JSON only, no markdown."
         )
 
-        prompt = f"""Creator profile:
+        prompt = f"""Creator profile (derived exclusively from their video transcripts):
 - Niche: {a.get("niche")}
 - Tone: {a.get("tone")}
 - Style tags: {", ".join(a.get("style_tags", []))}
@@ -197,7 +210,8 @@ async def generate_script(req: GenerateRequest):
 Write a complete YouTube script on: "{req.topic}"
 Target: {target["words"]} ({target["duration"]}) — {target["detail"]}
 
-Follow the writing guide strictly. Sound EXACTLY like this creator. No filler phrases.
+Follow the writing guide strictly. Sound EXACTLY like this creator — use their vocabulary,
+their sentence rhythm, their energy. No filler phrases. No generic YouTube-speak.
 
 Return ONLY this JSON:
 {{
