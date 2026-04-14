@@ -149,7 +149,8 @@ async def analyse(req: AnalyseRequest):
             "You only use what the creator actually says in their videos — never assumptions, never channel descriptions, never niche stereotypes. "
             "Study their exact vocabulary, sentence length, energy shifts, how they open, how they build arguments, how they close, "
             "their recurring phrases, filler words, humour style, and unique mannerisms. "
-            f"You also have access to web search — use it to find what topics are currently trending in this creator's niche in {current_year}. "
+            f"You also have access to web search — use it to find what topics are currently trending in this creator's niche "
+            f"in the last 7 days as of {current_date}. Prioritise topics that are gaining momentum right now, not older trends. "
             "Always respond with valid JSON only — no markdown, no preamble."
         )
 
