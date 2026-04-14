@@ -84,36 +84,49 @@ def health():
 async def analyse(req: AnalyseRequest):
     async def generate():
         channel_url = req.channelUrl.strip()
-        transcripts: list[str] = []
         handle = ""
 
         yield sse("status", {"message": "Resolving channel...", "step": 1})
         try:
-            video_ids, handle = await get_channel_video_ids(channel_url, max_videos=10)
+            video_ids, handle = await get_channel_video_ids(channel_url, max_videos=20)  # fetch 20 as buffer
             yield sse("status", {"message": f"Found {len(video_ids)} videos. Reading transcripts...", "step": 2})
         except Exception as e:
             yield sse("error", {"message": f"Could not find this channel. Please check the URL and try again. ({e})"})
             return
 
-        fetched = 0
-        ytdlp_triggered = False
-        for vid in video_ids:
+        # ── FIX 1: Parallel transcript fetching ──────────────────────────
+        yield sse("status", {"message": "Reading transcripts...", "step": 2})
+
+        async def fetch_one(vid):
             text, used_ytdlp = await asyncio.to_thread(fetch_transcript, vid)
-            if used_ytdlp and not ytdlp_triggered:
-                ytdlp_triggered = True
-                yield sse("status", {"message": "Some videos need extra processing — hang tight...", "step": 2})
-            if text:
+            return vid, text, used_ytdlp
+
+        # Fetch all in parallel
+        results = await asyncio.gather(*[fetch_one(vid) for vid in video_ids])
+
+        transcripts: list[str] = []
+        ytdlp_triggered = any(used for _, _, used in results)
+
+        for vid, text, used_ytdlp in results:
+            if text and len(text.strip()) > 200:  # filter short/empty
                 transcripts.append(text)
-                fetched += 1
-                if not ytdlp_triggered:
-                    yield sse("status", {"message": f"Reading transcripts... ({fetched}/{len(video_ids)})", "step": 2})
-                else:
-                    yield sse("status", {"message": f"Processing videos... ({fetched}/{len(video_ids)})", "step": 2})
+            if len(transcripts) >= 10:
+                break  # stop once we have 10 good ones
+
+        if ytdlp_triggered:
+            yield sse("status", {"message": f"Processed {len(transcripts)} videos...", "step": 2})
+        else:
+            yield sse("status", {"message": f"Read {len(transcripts)} transcripts...", "step": 2})
 
         # Hard stop if no transcripts found
         if not transcripts:
             yield sse("error", {"message": "No transcripts found for this channel. Captions appear to be disabled. Please try a channel that has captions enabled — most large creators do."})
             return
+
+        if len(transcripts) < 3:
+            yield sse("error", {"message": "Not enough usable transcripts found. Please try a channel with more videos."})
+            return
+        # ─────────────────────────────────────────────────────────────────
 
         yield sse("status", {"message": "Analysing voice, tone, and patterns...", "step": 3})
 
