@@ -200,11 +200,11 @@ Return ONLY this exact JSON (no markdown fences):
             raw = text_blocks[-1] if text_blocks else ""
             print(f"[analyse] raw preview: {raw[:200]}", file=sys.stderr)
 
-            clean = raw.strip()
-            if clean.startswith("```"):
-                clean = clean.split("```")[1]
-                if clean.startswith("json"):
-                    clean = clean[4:]
+           clean = raw.strip()
+            if "```json" in clean:
+                clean = clean.split("```json")[1].split("```")[0]
+            elif "```" in clean:
+                clean = clean.split("```")[1].split("```")[0]
             clean = clean.strip()
             analysis = json.loads(clean)
             yield sse("complete", {"analysis": analysis})
