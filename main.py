@@ -181,14 +181,39 @@ Return ONLY this exact JSON (no markdown fences):
 }}"""
 
         try:
-            client = make_client()
-            message = await asyncio.to_thread(
-                client.messages.create,
-                model=MODEL,
-                max_tokens=1500,
-                system=system,
-                messages=[{"role": "user", "content": prompt}],
+            # Keepalive ping task to prevent Render's 30s timeout
+            ping_task = asyncio.create_task(asyncio.sleep(0))  # placeholder
+            
+            async def send_pings(queue: asyncio.Queue):
+                while True:
+                    await asyncio.sleep(10)
+                    await queue.put(sse("ping", {}))
+
+            queue: asyncio.Queue = asyncio.Queue()
+            ping_task = asyncio.create_task(send_pings(queue))
+
+            # Run LLM in thread
+            message_result = asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: make_client().messages.create(
+                    model=MODEL,
+                    max_tokens=1500,
+                    system=system,
+                    messages=[{"role": "user", "content": prompt}],
+                )
             )
+
+            # Yield pings while waiting for LLM
+            while not message_result.done():
+                try:
+                    ping = queue.get_nowait()
+                    yield ping
+                except asyncio.QueueEmpty:
+                    pass
+                await asyncio.sleep(1)
+
+            ping_task.cancel()
+            message = await message_result
 
             raw = "".join(b.text for b in message.content if b.type == "text")
             clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
@@ -250,14 +275,37 @@ Return ONLY this JSON:
 }}"""
 
         try:
-            client = make_client()
-            message = await asyncio.to_thread(
-                client.messages.create,
-                model=MODEL,
-                max_tokens=4096,
-                system=system,
-                messages=[{"role": "user", "content": prompt}],
+            # Keepalive ping task to prevent Render's 30s timeout
+            async def send_pings(queue: asyncio.Queue):
+                while True:
+                    await asyncio.sleep(10)
+                    await queue.put(sse("ping", {}))
+
+            queue: asyncio.Queue = asyncio.Queue()
+            ping_task = asyncio.create_task(send_pings(queue))
+
+            # Run LLM in thread
+            message_result = asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: make_client().messages.create(
+                    model=MODEL,
+                    max_tokens=4096,
+                    system=system,
+                    messages=[{"role": "user", "content": prompt}],
+                )
             )
+
+            # Yield pings while waiting for LLM
+            while not message_result.done():
+                try:
+                    ping = queue.get_nowait()
+                    yield ping
+                except asyncio.QueueEmpty:
+                    pass
+                await asyncio.sleep(1)
+
+            ping_task.cancel()
+            message = await message_result
 
             raw = "".join(b.text for b in message.content if b.type == "text")
             clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
