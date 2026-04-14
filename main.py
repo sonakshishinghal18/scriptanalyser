@@ -133,12 +133,12 @@ async def analyse(req: AnalyseRequest):
 
         # ── Build channel metadata context ────────────────────────────────
         try:
-            sub_count = int(channel_metadata.get("subscriber_count", 0))
+            sub_count  = int(channel_metadata.get("subscriber_count", 0))
             view_count = int(channel_metadata.get("view_count", 0))
             vid_count  = int(channel_metadata.get("video_count", 1))
             avg_views  = view_count // max(vid_count, 1)
         except (ValueError, ZeroDivisionError):
-            sub_count = avg_views = 0
+            sub_count = avg_views = view_count = vid_count = 0
 
         metadata_context = f"""
 Channel context (use for background awareness ONLY — do NOT use for voice/style analysis):
@@ -359,11 +359,19 @@ Return ONLY this JSON:
 }}"""
 
         try:
+            # ── Dynamic max_tokens based on script length ─────────────────
+            token_map = {
+                "short":  3000,
+                "medium": 5000,
+                "long":   7000,
+            }
+            max_tokens = token_map.get(req.length, 5000)
+
             def call_claude_generate():
-                print(f"[generate] calling Claude, topic={req.topic}, length={req.length}", file=sys.stderr)
+                print(f"[generate] calling Claude, topic={req.topic}, length={req.length}, max_tokens={max_tokens}", file=sys.stderr)
                 result = make_client().messages.create(
                     model=MODEL,
-                    max_tokens=3000,
+                    max_tokens=max_tokens,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -372,6 +380,12 @@ Return ONLY this JSON:
 
             message = await asyncio.to_thread(call_claude_generate)
             print("[generate] got message back", file=sys.stderr)
+
+            # ── Check if Claude was cut off before finishing ───────────────
+            if message.stop_reason == "max_tokens":
+                print(f"[generate] hit max_tokens limit", file=sys.stderr)
+                yield sse("error", {"message": "Script was too long to generate. Try a shorter length or simpler topic."})
+                return
 
             raw = "".join(b.text for b in message.content if b.type == "text")
             print(f"[generate] raw length={len(raw)}", file=sys.stderr)
