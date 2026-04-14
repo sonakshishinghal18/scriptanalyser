@@ -93,7 +93,7 @@ async def analyse(req: AnalyseRequest):
 
         yield sse("status", {"message": "Resolving channel...", "step": 1})
         try:
-            video_ids, handle = await get_channel_video_ids(channel_url, max_videos=10)
+            video_ids, handle = await get_channel_video_ids(channel_url, max_videos=12)
             yield sse("status", {"message": f"Found {len(video_ids)} videos. Reading transcripts...", "step": 2})
         except Exception as e:
             yield sse("error", {"message": f"Could not find this channel. Please check the URL and try again. ({e})"})
