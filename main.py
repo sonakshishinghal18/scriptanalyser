@@ -6,6 +6,7 @@ Frontend (HTML/CSS/JS) is served directly from this same service.
 
 import json
 import os
+import sys
 import asyncio
 from pathlib import Path
 from dotenv import load_dotenv
@@ -176,15 +177,17 @@ Return ONLY this exact JSON (no markdown fences):
 
         try:
             def call_claude_analyse():
-                return make_client().messages.create(
+                print("[analyse] calling Claude...", file=sys.stderr)
+                result = make_client().messages.create(
                     model=MODEL,
                     max_tokens=1500,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
                 )
+                print(f"[analyse] Claude done, stop_reason={result.stop_reason}", file=sys.stderr)
+                return result
 
             message = await asyncio.to_thread(call_claude_analyse)
-
             raw = "".join(b.text for b in message.content if b.type == "text")
             clean = raw.strip()
             if clean.startswith("```"):
@@ -231,7 +234,8 @@ async def generate_script(req: GenerateRequest):
 - Writing guide: {a.get("writing_guide")}
 
 Write a complete YouTube script on: "{req.topic}"
-Target: {target["words"]} ({target["duration"]}) — {target["detail"]}
+Target: STRICTLY {target["words"]} total — do NOT exceed this. ({target["duration"]}) — {target["detail"]}
+IMPORTANT: Count your words. Stay within the word limit. It is better to be slightly under than over.
 
 Follow the writing guide strictly. Sound EXACTLY like this creator — use their vocabulary,
 their sentence rhythm, their energy. No filler phrases. No generic YouTube-speak.
@@ -241,31 +245,28 @@ Return ONLY this JSON:
   "suggested_title": "best YouTube title for this video",
   "thumbnail_hook": "6-8 word phrase for thumbnail text",
   "sections": [
-    {{ "name": "Hook",           "label": "First 30 seconds", "content": "full script — grab attention immediately in creator's voice" }},
-    {{ "name": "Intro",          "label": "Set the stage",    "content": "full script content" }},
-    {{ "name": "Main Content",   "label": "The core",         "content": "full script — longest section, {target["detail"]}" }},
-    {{ "name": "Key Takeaways",  "label": "Land it",          "content": "full script content" }},
-    {{ "name": "Outro & CTA",    "label": "Close strong",     "content": "full script — end exactly how this creator ends videos" }}
+    {{ "name": "Hook",           "label": "First 30 seconds", "content": "script content — 50-80 words" }},
+    {{ "name": "Intro",          "label": "Set the stage",    "content": "script content — 80-120 words" }},
+    {{ "name": "Main Content",   "label": "The core",         "content": "script content — longest section" }},
+    {{ "name": "Key Takeaways",  "label": "Land it",          "content": "script content — 80-100 words" }},
+    {{ "name": "Outro & CTA",    "label": "Close strong",     "content": "script content — 50-80 words" }}
   ]
 }}"""
 
- try:
-            import sys
-            print(f"[generate] starting Claude call, topic={req.topic}, length={req.length}", file=sys.stderr)
-
+        try:
             def call_claude_generate():
-                print(f"[generate] inside thread, calling Claude...", file=sys.stderr)
+                print(f"[generate] calling Claude, topic={req.topic}, length={req.length}", file=sys.stderr)
                 result = make_client().messages.create(
                     model=MODEL,
                     max_tokens=3000,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                print(f"[generate] Claude responded, stop_reason={result.stop_reason}", file=sys.stderr)
+                print(f"[generate] Claude done, stop_reason={result.stop_reason}", file=sys.stderr)
                 return result
 
             message = await asyncio.to_thread(call_claude_generate)
-            print(f"[generate] got message back", file=sys.stderr)
+            print("[generate] got message back", file=sys.stderr)
 
             raw = "".join(b.text for b in message.content if b.type == "text")
             clean = raw.strip()
@@ -283,9 +284,11 @@ Return ONLY this JSON:
 
             yield sse("complete", {"script": script})
 
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            print(f"[generate] JSON error: {e}", file=sys.stderr)
             yield sse("error", {"message": "Failed to parse script. Please try again."})
         except Exception as e:
+            print(f"[generate] exception: {e}", file=sys.stderr)
             yield sse("error", {"message": f"Script generation failed: {str(e)}"})
 
     return StreamingResponse(stream(), media_type="text/event-stream")
