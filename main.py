@@ -289,7 +289,7 @@ Return ONLY this JSON:
                 None,
                 lambda: make_client().messages.create(
                     model=MODEL,
-                    max_tokens=4096,
+                    max_tokens=3000,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
                 )
