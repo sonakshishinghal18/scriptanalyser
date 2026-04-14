@@ -180,22 +180,25 @@ Return ONLY this exact JSON (no markdown fences):
   ]
 }}"""
 
-        client = make_client()
-        message = client.messages.create(
-            model=MODEL,
-            max_tokens=1500,
-            system=system,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        raw = "".join(b.text for b in message.content if b.type == "text")
-        clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
         try:
+            client = make_client()
+            message = await asyncio.to_thread(
+                client.messages.create,
+                model=MODEL,
+                max_tokens=1500,
+                system=system,
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            raw = "".join(b.text for b in message.content if b.type == "text")
+            clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
             analysis = json.loads(clean)
             yield sse("complete", {"analysis": analysis})
+
         except json.JSONDecodeError:
             yield sse("error", {"message": "Failed to parse analysis. Please try again."})
-            return
+        except Exception as e:
+            yield sse("error", {"message": f"Analysis failed: {str(e)}"})
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -246,26 +249,30 @@ Return ONLY this JSON:
   ]
 }}"""
 
-        client = make_client()
-        with client.messages.stream(
-            model=MODEL,
-            max_tokens=4096,
-            system=system,
-            messages=[{"role": "user", "content": prompt}],
-        ) as lm_stream:
-            raw = ""
-            for text in lm_stream.text_stream:
-                raw += text
-                yield sse("chunk", {"text": text})
-
-        clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
         try:
+            client = make_client()
+            message = await asyncio.to_thread(
+                client.messages.create,
+                model=MODEL,
+                max_tokens=4096,
+                system=system,
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            raw = "".join(b.text for b in message.content if b.type == "text")
+            clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+
             script = json.loads(clean)
+
             if not script.get("sections"):
                 yield sse("error", {"message": "Script was generated but is incomplete. Please try again."})
                 return
+
             yield sse("complete", {"script": script})
+
         except json.JSONDecodeError:
             yield sse("error", {"message": "Failed to parse script. Please try again."})
+        except Exception as e:
+            yield sse("error", {"message": f"Script generation failed: {str(e)}"})
 
     return StreamingResponse(stream(), media_type="text/event-stream")
