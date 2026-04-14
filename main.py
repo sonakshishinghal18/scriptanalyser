@@ -249,16 +249,23 @@ Return ONLY this JSON:
   ]
 }}"""
 
-        try:
+ try:
+            import sys
+            print(f"[generate] starting Claude call, topic={req.topic}, length={req.length}", file=sys.stderr)
+
             def call_claude_generate():
-                return make_client().messages.create(
+                print(f"[generate] inside thread, calling Claude...", file=sys.stderr)
+                result = make_client().messages.create(
                     model=MODEL,
                     max_tokens=3000,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
                 )
+                print(f"[generate] Claude responded, stop_reason={result.stop_reason}", file=sys.stderr)
+                return result
 
             message = await asyncio.to_thread(call_claude_generate)
+            print(f"[generate] got message back", file=sys.stderr)
 
             raw = "".join(b.text for b in message.content if b.type == "text")
             clean = raw.strip()
