@@ -9,6 +9,7 @@ import os
 import sys
 import asyncio
 from pathlib import Path
+from datetime import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -141,12 +142,14 @@ async def analyse(req: AnalyseRequest):
 
         yield sse("status", {"message": "Finding trending topics in your niche...", "step": 4})
 
+        current_year = datetime.now().year
+
         system = (
             "You are an expert content strategist who analyses YouTube creators exclusively from their transcripts. "
             "You only use what the creator actually says in their videos — never assumptions, never channel descriptions, never niche stereotypes. "
             "Study their exact vocabulary, sentence length, energy shifts, how they open, how they build arguments, how they close, "
             "their recurring phrases, filler words, humour style, and unique mannerisms. "
-            "You also have access to web search — use it to find what topics are currently trending in this creator's niche in 2026. "
+            f"You also have access to web search — use it to find what topics are currently trending in this creator's niche in {current_year}. "
             "Always respond with valid JSON only — no markdown, no preamble."
         )
 
@@ -154,7 +157,7 @@ async def analyse(req: AnalyseRequest):
 
 Using ONLY the transcripts above as your source for voice and style analysis:
 1. Analyse how this creator speaks — their exact words, sentence structures, catchphrases, energy, opening style, argument style, closing style.
-2. Search the web for what topics are currently trending in this creator's niche in 2026.
+2. Search the web for what topics are currently trending in this creator's niche in {current_year}.
 3. Suggest 5 video topics that combine their proven content style with current trending topics.
 
 Return ONLY this exact JSON (no markdown fences):
@@ -188,15 +191,15 @@ Return ONLY this exact JSON (no markdown fences):
                 print(f"[analyse] Claude done, stop_reason={result.stop_reason}", file=sys.stderr)
                 return result
 
+            message = await asyncio.to_thread(call_claude_analyse)
 
-             message = await asyncio.to_thread(call_claude_analyse)
-                    # With web search, Claude may return multiple content blocks
-                    # We need the LAST text block which contains the final JSON
-                    text_blocks = [b.text for b in message.content if b.type == "text"]
-                    print(f"[analyse] text blocks count: {len(text_blocks)}", file=sys.stderr)
-                    raw = text_blocks[-1] if text_blocks else ""
-                    print(f"[analyse] raw preview: {raw[:200]}", file=sys.stderr)
-                    
+            # With web search, Claude returns multiple content blocks
+            # Take the LAST text block which contains the final JSON
+            text_blocks = [b.text for b in message.content if b.type == "text"]
+            print(f"[analyse] text blocks count: {len(text_blocks)}", file=sys.stderr)
+            raw = text_blocks[-1] if text_blocks else ""
+            print(f"[analyse] raw preview: {raw[:200]}", file=sys.stderr)
+
             clean = raw.strip()
             if clean.startswith("```"):
                 clean = clean.split("```")[1]
