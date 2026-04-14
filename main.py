@@ -108,8 +108,8 @@ async def analyse(req: AnalyseRequest):
         transcripts: list[str] = []
         ytdlp_triggered = False
 
-        for i in range(0, len(video_ids), 3):
-            batch = video_ids[i:i+3]
+        for i in range(0, len(video_ids), 5):
+            batch = video_ids[i:i+5]
             results = await asyncio.gather(*[fetch_one(vid) for vid in batch])
 
             for vid, text, used in results:
@@ -120,10 +120,10 @@ async def analyse(req: AnalyseRequest):
 
             yield sse("status", {"message": f"Reading transcripts... ({len(transcripts)} so far)", "step": 2})
 
-            if len(transcripts) >= 8:
+            if len(transcripts) >= 10:
                 break
 
-        transcripts = transcripts[:8]
+        transcripts = transcripts[:10]
 
         if not transcripts:
             yield sse("error", {"message": "No transcripts found for this channel. Captions appear to be disabled. Please try a channel that has captions enabled — most large creators do."})
@@ -158,8 +158,9 @@ async def analyse(req: AnalyseRequest):
 
 Using ONLY the transcripts above as your source for voice and style analysis:
 1. Analyse how this creator speaks — their exact words, sentence structures, catchphrases, energy, opening style, argument style, closing style.
-2. Search the web for what topics are currently trending in this creator's niche in {current_date}.
+2. Search the web for what topics are currently trending in this creator's niche in the last 7 days as of {current_date}.
 3. Suggest 5 video topics that combine their proven content style with current trending topics.
+4. Extract 3 real verbatim excerpts from the transcripts that best showcase how this creator speaks.
 
 Return ONLY this exact JSON (no markdown fences):
 {{
@@ -169,7 +170,21 @@ Return ONLY this exact JSON (no markdown fences):
   "posting_pattern": "e.g. Weekly",
   "style_tags": ["tag1", "tag2", "tag3", "tag4"],
   "voice_summary": "2-3 sentences describing exactly how this creator speaks based on the transcripts — their energy, vocabulary level, signature habits",
-  "writing_guide": "3-4 specific instructions a ghostwriter must follow to sound exactly like this creator, based on transcript evidence",
+  "writing_guide": {{
+    "sentence_length": "describe their typical sentence length and rhythm — e.g. short punchy sentences mixed with longer explanations",
+    "opening_style": "exactly how they start videos — their first 2-3 sentences pattern",
+    "signature_phrases": ["exact phrase 1 they repeat", "exact phrase 2", "exact phrase 3"],
+    "transitions": "exactly how they move between points — words or phrases they use",
+    "energy_pattern": "where they speed up, slow down, use emphasis — describe the rhythm",
+    "filler_words": ["filler1", "filler2", "filler3"],
+    "closing_style": "exactly how they end videos — their sign-off pattern",
+    "instructions": "4-5 specific rules a ghostwriter MUST follow to sound exactly like this creator"
+  }},
+  "voice_examples": [
+    "verbatim 2-3 sentence excerpt from transcripts showing how they open or hook",
+    "verbatim 2-3 sentence excerpt showing how they explain or argue a point",
+    "verbatim 2-3 sentence excerpt showing how they close or transition"
+  ],
   "topics": [
     {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": true }},
     {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": false }},
@@ -184,7 +199,7 @@ Return ONLY this exact JSON (no markdown fences):
                 print("[analyse] calling Claude with web search...", file=sys.stderr)
                 result = make_client().messages.create(
                     model=MODEL,
-                    max_tokens=2000,
+                    max_tokens=3000,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
                     tools=[{"type": "web_search_20250305", "name": "web_search"}],
@@ -228,12 +243,36 @@ async def generate_script(req: GenerateRequest):
         target = length_map.get(req.length, length_map["medium"])
         a = req.analysis
 
+        # ── Extract rich voice data from analysis ─────────────────────────
+        writing_guide = a.get("writing_guide", {})
+        voice_examples = a.get("voice_examples", [])
+
+        # Handle both old string format and new dict format
+        if isinstance(writing_guide, str):
+            writing_guide_text = writing_guide
+        else:
+            writing_guide_text = f"""
+- Sentence length & rhythm: {writing_guide.get("sentence_length", "")}
+- Opening style: {writing_guide.get("opening_style", "")}
+- Signature phrases to use: {", ".join(writing_guide.get("signature_phrases", []))}
+- Transitions: {writing_guide.get("transitions", "")}
+- Energy pattern: {writing_guide.get("energy_pattern", "")}
+- Filler words to sprinkle in: {", ".join(writing_guide.get("filler_words", []))}
+- Closing style: {writing_guide.get("closing_style", "")}
+- Rules: {writing_guide.get("instructions", "")}"""
+
+        voice_examples_text = ""
+        if voice_examples:
+            voice_examples_text = "\n\nHere are REAL examples of how this creator actually speaks — match this style exactly:\n"
+            for i, example in enumerate(voice_examples, 1):
+                voice_examples_text += f'\nExample {i}: "{example}"'
+
         yield sse("status", {"message": "Writing your script..."})
 
         system = (
             "You are a master ghostwriter for YouTube creators. "
             "You write scripts that sound exactly like the creator — their specific words, rhythm, energy, mannerisms. "
-            "You base everything on what you know about how they actually speak from transcript analysis. "
+            "You have been given real transcript examples of how this creator speaks — study them carefully and mimic every detail. "
             "Never generic, never corporate. Always valid JSON only, no markdown."
         )
 
@@ -242,14 +281,18 @@ async def generate_script(req: GenerateRequest):
 - Tone: {a.get("tone")}
 - Style tags: {", ".join(a.get("style_tags", []))}
 - Voice summary: {a.get("voice_summary")}
-- Writing guide: {a.get("writing_guide")}
+
+Writing guide:
+{writing_guide_text}
+{voice_examples_text}
 
 Write a complete YouTube script on: "{req.topic}"
 Target: STRICTLY {target["words"]} total — do NOT exceed this. ({target["duration"]}) — {target["detail"]}
 IMPORTANT: Count your words. Stay within the word limit. It is better to be slightly under than over.
 
-Follow the writing guide strictly. Sound EXACTLY like this creator — use their vocabulary,
-their sentence rhythm, their energy. No filler phrases. No generic YouTube-speak.
+Follow the writing guide strictly. Use the real voice examples above as your style template.
+Sound EXACTLY like this creator — use their vocabulary, their sentence rhythm, their energy,
+their signature phrases, their filler words. No generic YouTube-speak. No filler phrases.
 
 Return ONLY this JSON:
 {{
