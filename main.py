@@ -193,19 +193,18 @@ Return ONLY this exact JSON (no markdown fences):
 
             message = await asyncio.to_thread(call_claude_analyse)
 
-            # With web search, Claude returns multiple content blocks
-            # Take the LAST text block which contains the final JSON
             text_blocks = [b.text for b in message.content if b.type == "text"]
             print(f"[analyse] text blocks count: {len(text_blocks)}", file=sys.stderr)
             raw = text_blocks[-1] if text_blocks else ""
             print(f"[analyse] raw preview: {raw[:200]}", file=sys.stderr)
 
-           clean = raw.strip()
+            clean = raw.strip()
             if "```json" in clean:
                 clean = clean.split("```json")[1].split("```")[0]
             elif "```" in clean:
                 clean = clean.split("```")[1].split("```")[0]
             clean = clean.strip()
+
             analysis = json.loads(clean)
             yield sse("complete", {"analysis": analysis})
 
