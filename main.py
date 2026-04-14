@@ -163,9 +163,7 @@ Channel context (use for background awareness ONLY — do NOT use for voice/styl
             f"{transcript_block}"
         )
 
-        yield sse("status", {"message": "Finding trending topics in your niche...", "step": 4})
-
-        current_date = datetime.now().strftime("%B %d, %Y")
+        yield sse("status", {"message": "Analysing voice and finding topics...", "step": 4})
 
         system = (
             "You are an expert content strategist who analyses YouTube creators exclusively from their transcripts. "
@@ -174,8 +172,6 @@ Channel context (use for background awareness ONLY — do NOT use for voice/styl
             "their recurring phrases, filler words, humour style, and unique mannerisms. "
             "You are also given channel metadata (subscribers, description, country etc.) — use this for CONTEXT ONLY "
             "to inform topic relevance, audience size awareness, and cultural references. Never use it for voice analysis. "
-            f"You also have access to web search — use it to find what topics are currently trending in this creator's niche "
-            f"in the last 7 days as of {current_date}. Prioritise topics that are gaining momentum right now, not older trends. "
             "Always respond with valid JSON only — no markdown, no preamble."
         )
 
@@ -186,9 +182,8 @@ and the channel metadata as background context for topic relevance:
 
 1. Analyse how this creator speaks — their exact words, sentence structures, catchphrases, energy, opening style, argument style, closing style.
 2. Use the channel description and subscriber count to understand their audience and positioning.
-3. Search the web for what topics are currently trending in this creator's niche in the last 7 days as of {current_date}.
-4. Suggest 5 video topics that combine their proven content style with current trending topics, appropriate for their audience size ({sub_count:,} subscribers).
-5. Extract 3 real verbatim excerpts from the transcripts that best showcase how this creator speaks.
+3. Suggest 5 video topics that fit this creator's proven content style and audience — topics they would naturally cover based on their transcripts.
+4. Extract 3 real verbatim excerpts from the transcripts that best showcase how this creator speaks.
 
 Return ONLY this exact JSON (no markdown fences):
 {{
@@ -214,23 +209,22 @@ Return ONLY this exact JSON (no markdown fences):
     "verbatim 2-3 sentence excerpt showing how they close or transition"
   ],
   "topics": [
-    {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": true }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": false }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": true }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": false }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": true }}
+    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": false }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": false }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": false }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": false }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": false }}
   ]
 }}"""
 
         try:
             def call_claude_analyse():
-                print("[analyse] calling Claude with web search...", file=sys.stderr)
+                print("[analyse] calling Claude...", file=sys.stderr)
                 result = make_client().messages.create(
                     model=MODEL,
                     max_tokens=3000,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
-                    tools=[{"type": "web_search_20250305", "name": "web_search"}],
                 )
                 print(f"[analyse] Claude done, stop_reason={result.stop_reason}", file=sys.stderr)
                 return result
@@ -400,12 +394,20 @@ Return ONLY this JSON:
             print(f"[generate] text blocks count: {len(text_blocks)}", file=sys.stderr)
             raw = text_blocks[-1] if text_blocks else ""
             print(f"[generate] raw length={len(raw)}", file=sys.stderr)
+            print(f"[generate] raw preview: {raw[:500]}", file=sys.stderr)
 
+            # ── Robust JSON extraction ────────────────────────────────────
             clean = raw.strip()
-            if clean.startswith("```"):
-                clean = clean.split("```")[1]
-                if clean.startswith("json"):
-                    clean = clean[4:]
+            if "```json" in clean:
+                clean = clean.split("```json")[1].split("```")[0]
+            elif "```" in clean:
+                clean = clean.split("```")[1].split("```")[0]
+            else:
+                # Find JSON object anywhere in response
+                start = clean.find("{")
+                end = clean.rfind("}") + 1
+                if start != -1 and end > start:
+                    clean = clean[start:end]
             clean = clean.strip()
 
             print(f"[generate] attempting json.loads", file=sys.stderr)
