@@ -93,7 +93,7 @@ async def analyse(req: AnalyseRequest):
 
         yield sse("status", {"message": "Resolving channel...", "step": 1})
         try:
-            video_ids, handle = await get_channel_video_ids(channel_url, max_videos=12)
+            video_ids, handle, channel_metadata = await get_channel_video_ids(channel_url, max_videos=20)
             yield sse("status", {"message": f"Found {len(video_ids)} videos. Reading transcripts...", "step": 2})
         except Exception as e:
             yield sse("error", {"message": f"Could not find this channel. Please check the URL and try again. ({e})"})
@@ -131,10 +131,33 @@ async def analyse(req: AnalyseRequest):
 
         yield sse("status", {"message": f"Read {len(transcripts)} transcripts. Analysing voice...", "step": 3})
 
+        # ── Build channel metadata context ────────────────────────────────
+        try:
+            sub_count = int(channel_metadata.get("subscriber_count", 0))
+            view_count = int(channel_metadata.get("view_count", 0))
+            vid_count  = int(channel_metadata.get("video_count", 1))
+            avg_views  = view_count // max(vid_count, 1)
+        except (ValueError, ZeroDivisionError):
+            sub_count = avg_views = 0
+
+        metadata_context = f"""
+Channel context (use for background awareness ONLY — do NOT use for voice/style analysis):
+- Channel name: {channel_metadata.get("title", "")}
+- Description: {channel_metadata.get("description", "")}
+- Subscribers: {sub_count:,}
+- Total views: {view_count:,}
+- Videos published: {vid_count}
+- Avg views per video: {avg_views:,}
+- Country: {channel_metadata.get("country", "Unknown")}
+- On YouTube since: {channel_metadata.get("joined", "")[:4]}
+"""
+
         transcript_block = "\n\n---\n\n".join(
             f"Video {i+1}:\n{t}" for i, t in enumerate(transcripts)
         )
+
         context = (
+            f"{metadata_context}\n\n"
             f"Here are transcripts from {len(transcripts)} of this creator's recent videos. "
             f"These transcripts are your ONLY source of truth for voice and style — analyse them deeply.\n\n"
             f"{transcript_block}"
@@ -149,6 +172,8 @@ async def analyse(req: AnalyseRequest):
             "You only use what the creator actually says in their videos — never assumptions, never channel descriptions, never niche stereotypes. "
             "Study their exact vocabulary, sentence length, energy shifts, how they open, how they build arguments, how they close, "
             "their recurring phrases, filler words, humour style, and unique mannerisms. "
+            "You are also given channel metadata (subscribers, description, country etc.) — use this for CONTEXT ONLY "
+            "to inform topic relevance, audience size awareness, and cultural references. Never use it for voice analysis. "
             f"You also have access to web search — use it to find what topics are currently trending in this creator's niche "
             f"in the last 7 days as of {current_date}. Prioritise topics that are gaining momentum right now, not older trends. "
             "Always respond with valid JSON only — no markdown, no preamble."
@@ -156,15 +181,18 @@ async def analyse(req: AnalyseRequest):
 
         prompt = f"""{context}
 
-Using ONLY the transcripts above as your source for voice and style analysis:
+Using the transcripts above as your ONLY source for voice and style analysis,
+and the channel metadata as background context for topic relevance:
+
 1. Analyse how this creator speaks — their exact words, sentence structures, catchphrases, energy, opening style, argument style, closing style.
-2. Search the web for what topics are currently trending in this creator's niche in the last 7 days as of {current_date}.
-3. Suggest 5 video topics that combine their proven content style with current trending topics.
-4. Extract 3 real verbatim excerpts from the transcripts that best showcase how this creator speaks.
+2. Use the channel description and subscriber count to understand their audience and positioning.
+3. Search the web for what topics are currently trending in this creator's niche in the last 7 days as of {current_date}.
+4. Suggest 5 video topics that combine their proven content style with current trending topics, appropriate for their audience size ({sub_count:,} subscribers).
+5. Extract 3 real verbatim excerpts from the transcripts that best showcase how this creator speaks.
 
 Return ONLY this exact JSON (no markdown fences):
 {{
-  "niche": "max 4 words — inferred from transcripts only",
+  "niche": "max 4 words — inferred from transcripts and channel description",
   "tone": "single word",
   "avg_video_length": "e.g. 12 min",
   "posting_pattern": "e.g. Weekly",
@@ -222,6 +250,18 @@ Return ONLY this exact JSON (no markdown fences):
             clean = clean.strip()
 
             analysis = json.loads(clean)
+
+            # ── Attach channel metadata to analysis for frontend use ──────
+            analysis["channel_metadata"] = {
+                "title":            channel_metadata.get("title", ""),
+                "subscriber_count": sub_count,
+                "video_count":      vid_count,
+                "view_count":       view_count,
+                "avg_views":        avg_views,
+                "country":          channel_metadata.get("country", ""),
+                "joined":           channel_metadata.get("joined", "")[:4],
+            }
+
             yield sse("complete", {"analysis": analysis})
 
         except json.JSONDecodeError:
@@ -244,8 +284,9 @@ async def generate_script(req: GenerateRequest):
         a = req.analysis
 
         # ── Extract rich voice data from analysis ─────────────────────────
-        writing_guide = a.get("writing_guide", {})
+        writing_guide  = a.get("writing_guide", {})
         voice_examples = a.get("voice_examples", [])
+        channel_meta   = a.get("channel_metadata", {})
 
         # Handle both old string format and new dict format
         if isinstance(writing_guide, str):
@@ -267,6 +308,16 @@ async def generate_script(req: GenerateRequest):
             for i, example in enumerate(voice_examples, 1):
                 voice_examples_text += f'\nExample {i}: "{example}"'
 
+        # ── Channel metadata context for generate ─────────────────────────
+        channel_context = ""
+        if channel_meta:
+            channel_context = f"""
+Channel context (for awareness only):
+- Subscribers: {channel_meta.get("subscriber_count", 0):,}
+- Avg views per video: {channel_meta.get("avg_views", 0):,}
+- Country: {channel_meta.get("country", "")}
+"""
+
         yield sse("status", {"message": "Writing your script..."})
 
         system = (
@@ -281,7 +332,7 @@ async def generate_script(req: GenerateRequest):
 - Tone: {a.get("tone")}
 - Style tags: {", ".join(a.get("style_tags", []))}
 - Voice summary: {a.get("voice_summary")}
-
+{channel_context}
 Writing guide:
 {writing_guide_text}
 {voice_examples_text}
