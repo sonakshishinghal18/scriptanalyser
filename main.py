@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import anthropic
 
@@ -93,7 +92,6 @@ async def analyse(req: AnalyseRequest):
             yield sse("error", {"message": f"Could not find this channel. Please check the URL and try again. ({e})"})
             return
 
-        # ── Parallel transcript fetching in batches of 5 ─────────────────
         yield sse("status", {"message": "Reading transcripts...", "step": 2})
 
         async def fetch_one(vid):
@@ -113,15 +111,12 @@ async def analyse(req: AnalyseRequest):
                 if text and len(text.strip()) > 200:
                     transcripts.append(text)
 
+            yield sse("status", {"message": f"Reading transcripts... ({len(transcripts)} so far)", "step": 2})
+
             if len(transcripts) >= 10:
                 break
 
         transcripts = transcripts[:10]
-
-        if ytdlp_triggered:
-            yield sse("status", {"message": f"Processed {len(transcripts)} videos...", "step": 2})
-        else:
-            yield sse("status", {"message": f"Read {len(transcripts)} transcripts...", "step": 2})
 
         if not transcripts:
             yield sse("error", {"message": "No transcripts found for this channel. Captions appear to be disabled. Please try a channel that has captions enabled — most large creators do."})
@@ -130,9 +125,8 @@ async def analyse(req: AnalyseRequest):
         if len(transcripts) < 3:
             yield sse("error", {"message": "Not enough usable transcripts found. Please try a channel with more videos."})
             return
-        # ─────────────────────────────────────────────────────────────────
 
-        yield sse("status", {"message": "Analysing voice, tone, and patterns...", "step": 3})
+        yield sse("status", {"message": f"Read {len(transcripts)} transcripts. Analysing voice...", "step": 3})
 
         transcript_block = "\n\n---\n\n".join(
             f"Video {i+1}:\n{t}" for i, t in enumerate(transcripts)
@@ -181,42 +175,23 @@ Return ONLY this exact JSON (no markdown fences):
 }}"""
 
         try:
-            # Keepalive ping task to prevent Render's 30s timeout
-            ping_task = asyncio.create_task(asyncio.sleep(0))  # placeholder
-            
-            async def send_pings(queue: asyncio.Queue):
-                while True:
-                    await asyncio.sleep(10)
-                    await queue.put(sse("ping", {}))
-
-            queue: asyncio.Queue = asyncio.Queue()
-            ping_task = asyncio.create_task(send_pings(queue))
-
-            # Run LLM in thread
-            message_result = asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: make_client().messages.create(
+            def call_claude_analyse():
+                return make_client().messages.create(
                     model=MODEL,
                     max_tokens=1500,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
                 )
-            )
 
-            # Yield pings while waiting for LLM
-            while not message_result.done():
-                try:
-                    ping = queue.get_nowait()
-                    yield ping
-                except asyncio.QueueEmpty:
-                    pass
-                await asyncio.sleep(1)
-
-            ping_task.cancel()
-            message = await message_result
+            message = await asyncio.to_thread(call_claude_analyse)
 
             raw = "".join(b.text for b in message.content if b.type == "text")
-            clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+            clean = raw.strip()
+            if clean.startswith("```"):
+                clean = clean.split("```")[1]
+                if clean.startswith("json"):
+                    clean = clean[4:]
+            clean = clean.strip()
             analysis = json.loads(clean)
             yield sse("complete", {"analysis": analysis})
 
@@ -234,7 +209,7 @@ async def generate_script(req: GenerateRequest):
         length_map = {
             "short":  {"words": "650-750 words",   "duration": "~5 minutes",  "detail": "punchy and tight"},
             "medium": {"words": "1400-1600 words",  "duration": "~10 minutes", "detail": "balanced depth and pace"},
-            "long":   {"words": "2800-3200 words",  "duration": "~20 minutes", "detail": "comprehensive with examples and deep dives"},
+            "long":   {"words": "1800-2000 words",  "duration": "~15 minutes", "detail": "comprehensive with examples and deep dives"},
         }
         target = length_map.get(req.length, length_map["medium"])
         a = req.analysis
@@ -275,40 +250,23 @@ Return ONLY this JSON:
 }}"""
 
         try:
-            # Keepalive ping task to prevent Render's 30s timeout
-            async def send_pings(queue: asyncio.Queue):
-                while True:
-                    await asyncio.sleep(10)
-                    await queue.put(sse("ping", {}))
-
-            queue: asyncio.Queue = asyncio.Queue()
-            ping_task = asyncio.create_task(send_pings(queue))
-
-            # Run LLM in thread
-            message_result = asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: make_client().messages.create(
+            def call_claude_generate():
+                return make_client().messages.create(
                     model=MODEL,
                     max_tokens=3000,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
                 )
-            )
 
-            # Yield pings while waiting for LLM
-            while not message_result.done():
-                try:
-                    ping = queue.get_nowait()
-                    yield ping
-                except asyncio.QueueEmpty:
-                    pass
-                await asyncio.sleep(1)
-
-            ping_task.cancel()
-            message = await message_result
+            message = await asyncio.to_thread(call_claude_generate)
 
             raw = "".join(b.text for b in message.content if b.type == "text")
-            clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+            clean = raw.strip()
+            if clean.startswith("```"):
+                clean = clean.split("```")[1]
+                if clean.startswith("json"):
+                    clean = clean[4:]
+            clean = clean.strip()
 
             script = json.loads(clean)
 
