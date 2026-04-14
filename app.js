@@ -1,13 +1,13 @@
 /* ── Config ──────────────────────────────────────────────── */
-const API = window.API_URL || '';   // injected via config.js on prod; empty = same origin
+const API = window.API_URL || '';
 
 /* ── State ───────────────────────────────────────────────── */
 const state = {
-  channelUrl:    '',
-  analysis:      null,
-  selectedTopic: '',
+  channelUrl:     '',
+  analysis:       null,
+  selectedTopic:  '',
   selectedLength: 'medium',
-  script:        null,
+  script:         null,
 };
 
 /* ── Page router ─────────────────────────────────────────── */
@@ -31,34 +31,43 @@ function copyText(text, btn, label = 'Copy') {
   });
 }
 
-/* SSE reader — calls onStatus(msg, step) and resolves with final data */
 async function readSSE(response, onStatus) {
   const reader = response.body.getReader();
   const dec = new TextDecoder();
   let buf = '', result = null;
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buf += dec.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop();
-    let evt = null, data = null;
-    for (const line of lines) {
-      if (line.startsWith('event: ')) { evt = line.slice(7).trim(); data = null; }
-      if (line.startsWith('data: '))  {
-        try { data = JSON.parse(line.slice(6)); } catch (_) {}
+
+    // Split on double newline — SSE event boundary
+    const events = buf.split('\n\n');
+    buf = events.pop(); // keep incomplete last chunk
+
+    for (const event of events) {
+      if (!event.trim()) continue;
+
+      let evt = null, dataStr = '';
+      for (const line of event.split('\n')) {
+        if (line.startsWith('event: ')) evt = line.slice(7).trim();
+        if (line.startsWith('data: ')) dataStr = line.slice(6);
       }
-      if (evt && data !== null) {
-        if (evt === 'status')   onStatus && onStatus(data.message, data.step);
-        if (evt === 'complete') result = data;
-        if (evt === 'warning')  onStatus && onStatus(data.message, null);
-        if (evt === 'chunk')    {} // ignored
-        if (evt === 'ping')     {} // keepalive — ignored
-        if (evt === 'error')    throw new Error(data.message || 'Server error');
-        evt = null; data = null;
+
+      if (evt && dataStr) {
+        try {
+          const data = JSON.parse(dataStr);
+          if (evt === 'status' && onStatus) onStatus(data.message, data.step);
+          if (evt === 'complete') result = data;
+          if (evt === 'error') throw new Error(data.message || 'Server error');
+        } catch (e) {
+          if (evt === 'error') throw e;
+          console.error('[sse] parse error:', e, 'raw:', dataStr.slice(0, 300));
+        }
       }
     }
   }
+
   if (!result) throw new Error('No result from server');
   return result;
 }
@@ -103,61 +112,29 @@ async function runAnalysis() {
   setAnalyseStep(1);
   $('analyse-error').classList.add('hidden');
 
-  // Timeout — 5 minutes max
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
-
-  // Wake lock — prevents screen from sleeping and dropping connection
-  let wakeLock = null;
-  try {
-    wakeLock = await navigator.wakeLock.request('screen');
-  } catch (_) {
-    // Wake lock not supported — not critical, continue anyway
-  }
-
   try {
     const res = await fetch(`${API}/api/analyse`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channelUrl: state.channelUrl }),
-      signal: controller.signal,
     });
-
     if (!res.ok) throw new Error(`Server error ${res.status}`);
 
-    // ✅ Fixed: was updating generate-status instead of analyse-status
     const data = await readSSE(res, (msg, step) => {
-      $('analyse-status').textContent = msg;
+      const el = $('analyse-status');
+      if (el) el.textContent = msg;
       if (step) setAnalyseStep(step);
     });
 
-    if (!data || !data.analysis) {
-      throw new Error('No analysis data received. Please try again.');
-    }
-
     setAnalyseStep(TOTAL_STEPS + 1);
     $('progress-fill').style.width = '100%';
+
     state.analysis = data.analysis;
     renderTopicsPage(data.analysis);
     showPage('topics');
-
   } catch (err) {
-    let msg = 'Something went wrong. Please try again.';
-    if (err.name === 'AbortError') {
-      msg = 'This is taking too long. Please try again or use a channel with fewer videos.';
-    } else if (err.message.includes('Server error 5')) {
-      msg = 'Server error. Please try again in a moment.';
-    } else if (err.message.includes('Failed to fetch') || err.message.includes('Load failed')) {
-      msg = 'Connection lost. Check your internet and try again.';
-    } else {
-      msg = err.message;
-    }
-    $('analyse-error-msg').textContent = msg;
+    $('analyse-error-msg').textContent = err.message;
     $('analyse-error').classList.remove('hidden');
-
-  } finally {
-    clearTimeout(timeout);
-    if (wakeLock) wakeLock.release();
   }
 }
 
@@ -167,11 +144,10 @@ $('analyse-back-btn').addEventListener('click', () => showPage('landing'));
    TOPICS PAGE
 ═══════════════════════════════════════════════════════════ */
 function renderTopicsPage(a) {
-  /* metrics */
   $('metrics-row').innerHTML = [
-    { label: 'Niche',         val: a.niche            },
-    { label: 'Tone',          val: a.tone             },
-    { label: 'Avg. length',   val: a.avg_video_length },
+    { label: 'Niche',       val: a.niche            },
+    { label: 'Tone',        val: a.tone             },
+    { label: 'Avg. length', val: a.avg_video_length },
   ].map(m => `
     <div class="metric-cell">
       <div class="metric-lbl">${m.label}</div>
@@ -180,13 +156,11 @@ function renderTopicsPage(a) {
 
   $('voice-summary').textContent = a.voice_summary || '';
 
-  /* tags */
   const tagColors = ['tag-0','tag-1','tag-2','tag-3'];
   $('tag-row').innerHTML = (a.style_tags || [])
     .map((t, i) => `<span class="tag ${tagColors[i % 4]}">${t}</span>`)
     .join('');
 
-  /* topics */
   $('topics-list').innerHTML = '';
   (a.topics || []).forEach((t, i) => {
     const btn = document.createElement('button');
@@ -208,13 +182,11 @@ function renderTopicsPage(a) {
     $('topics-list').appendChild(btn);
   });
 
-  /* reset length UI */
   document.querySelectorAll('.length-opt').forEach(btn => {
     btn.classList.toggle('selected', btn.dataset.length === state.selectedLength);
   });
 }
 
-/* custom topic input */
 $('custom-topic').addEventListener('input', function () {
   const v = this.value.trim();
   if (v) {
@@ -223,7 +195,6 @@ $('custom-topic').addEventListener('input', function () {
   }
 });
 
-/* length buttons */
 document.querySelectorAll('.length-opt').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.length-opt').forEach(b => b.classList.remove('selected'));
@@ -234,7 +205,6 @@ document.querySelectorAll('.length-opt').forEach(btn => {
 
 $('topics-back-btn').addEventListener('click', () => showPage('landing'));
 
-/* generate */
 $('generate-btn').addEventListener('click', async () => {
   const topic = $('custom-topic').value.trim() || state.selectedTopic;
   const errEl = $('topics-error');
@@ -244,25 +214,59 @@ $('generate-btn').addEventListener('click', async () => {
 
   state.selectedTopic = topic;
   showPage('generating');
+  startGeneratingMessages();
   await runGenerate();
 });
+
+/* ═══════════════════════════════════════════════════════════
+   GENERATING PAGE — rotating messages
+═══════════════════════════════════════════════════════════ */
+const GEN_MESSAGES = [
+  'Reading your videos...',
+  'Studying your vocabulary...',
+  'Understanding your patterns...',
+  'Assessing your tone...',
+  'Mapping your energy...',
+  'Learning your rhythm...',
+  'Analysing your hooks...',
+  'Capturing your style...',
+  'Writing your script...',
+  'Polishing every line...',
+  'Almost there...',
+];
+
+let _genMsgInterval = null;
+
+function startGeneratingMessages() {
+  let i = 0;
+  const el = $('gen-status');
+  if (!el) return;
+  el.style.opacity = '1';
+  el.textContent = GEN_MESSAGES[0];
+
+  _genMsgInterval = setInterval(() => {
+    i = (i + 1) % GEN_MESSAGES.length;
+    const el = $('gen-status');
+    if (!el) { stopGeneratingMessages(); return; }
+    el.style.opacity = '0';
+    setTimeout(() => {
+      const el = $('gen-status');
+      if (el) { el.textContent = GEN_MESSAGES[i]; el.style.opacity = '1'; }
+    }, 300);
+  }, 2500);
+}
+
+function stopGeneratingMessages() {
+  if (_genMsgInterval) {
+    clearInterval(_genMsgInterval);
+    _genMsgInterval = null;
+  }
+}
 
 /* ═══════════════════════════════════════════════════════════
    GENERATE PAGE
 ═══════════════════════════════════════════════════════════ */
 async function runGenerate() {
-  // Timeout — 5 minutes max
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
-
-  // Wake lock — prevents screen from sleeping and dropping connection
-  let wakeLock = null;
-  try {
-    wakeLock = await navigator.wakeLock.request('screen');
-  } catch (_) {
-    // Wake lock not supported — not critical, continue anyway
-  }
-
   try {
     const res = await fetch(`${API}/api/generate`, {
       method: 'POST',
@@ -272,44 +276,23 @@ async function runGenerate() {
         length:   state.selectedLength,
         analysis: state.analysis,
       }),
-      signal: controller.signal,
     });
-
     if (!res.ok) throw new Error(`Server error ${res.status}`);
 
-    const data = await readSSE(res, (msg, step) => {
-      $('generate-status').textContent = msg;
+    const data = await readSSE(res, (msg) => {
+      const el = $('gen-status');
+      if (el) el.textContent = msg;
     });
 
-    if (!data || !data.script) {
-      throw new Error("Couldn't generate a script — please try a different topic.");
-    }
-
-    if (!data.script.sections || data.script.sections.length === 0) {
-      throw new Error("Script was generated but is incomplete. Please try again.");
-    }
-
+    stopGeneratingMessages();
     state.script = data.script;
     renderScriptPage(data.script);
     showPage('script');
-
   } catch (err) {
-    let msg = 'Something went wrong. Please try again.';
-    if (err.name === 'AbortError') {
-      msg = 'Script generation timed out. Try a shorter length or different topic.';
-    } else if (err.message.includes('Server error')) {
-      msg = 'Something went wrong on our end. Please try again.';
-    } else if (err.message.includes('Failed to fetch') || err.message.includes('Load failed')) {
-      msg = 'Connection lost. Check your internet and try again.';
-    } else {
-      msg = err.message;
-    }
-    $('generate-error-msg').textContent = msg;
-    $('generate-error').classList.remove('hidden');
-
-  } finally {
-    clearTimeout(timeout);
-    if (wakeLock) wakeLock.release();
+    stopGeneratingMessages();
+    console.error('[generate] error:', err);
+    const el = $('gen-status');
+    if (el) el.textContent = `Error: ${err.message}`;
   }
 }
 
@@ -327,7 +310,6 @@ const SECTION_ACCENT = {
 function renderScriptPage(s) {
   $('script-title').textContent = s.suggested_title || state.selectedTopic;
 
-  /* meta row */
   const wordCount = (s.sections || []).reduce((n, sec) => n + sec.content.split(/\s+/).filter(Boolean).length, 0);
   $('script-meta').innerHTML = `
     <div class="meta-item"><div class="meta-dot" style="background:var(--accent-2)"></div>${wordCount.toLocaleString()} words</div>
@@ -335,7 +317,6 @@ function renderScriptPage(s) {
     ${s.thumbnail_hook ? `<div class="meta-item"><div class="meta-dot"></div>Thumbnail: <span class="thumbnail-hook">&ldquo;${s.thumbnail_hook}&rdquo;</span></div>` : ''}
   `;
 
-  /* sections */
   const container = $('script-sections');
   container.innerHTML = '';
   (s.sections || []).forEach((sec, i) => {
@@ -394,19 +375,22 @@ $('copy-all-btn').addEventListener('click', function () {
   copyText(text, this, 'Copy all');
 });
 
-$('reset-btn').addEventListener('click',       () => { resetState(); showPage('landing'); });
-$('start-over-btn').addEventListener('click',  () => { resetState(); showPage('landing'); });
+$('reset-btn').addEventListener('click',      () => { resetState(); showPage('landing'); });
+$('start-over-btn').addEventListener('click', () => { resetState(); showPage('landing'); });
 
 function resetState() {
-  state.channelUrl    = '';
-  state.analysis      = null;
-  state.selectedTopic = '';
+  state.channelUrl     = '';
+  state.analysis       = null;
+  state.selectedTopic  = '';
   state.selectedLength = 'medium';
-  state.script        = null;
+  state.script         = null;
   $('channel-url').value  = '';
   $('custom-topic').value = '';
   $('url-error').classList.add('hidden');
-  $('analyse-status').textContent = 'Starting analysis...';
-  $('progress-fill').style.width = '0%';
+  const analyseStatus = $('analyse-status');
+  if (analyseStatus) analyseStatus.textContent = 'Starting analysis...';
+  const progressFill = $('progress-fill');
+  if (progressFill) progressFill.style.width = '0%';
   document.querySelectorAll('.step-item').forEach(el => el.classList.remove('active','done'));
+  stopGeneratingMessages();
 }
