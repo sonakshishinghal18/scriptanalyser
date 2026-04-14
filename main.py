@@ -114,16 +114,16 @@ async def analyse(req: AnalyseRequest):
 
             yield sse("status", {"message": f"Reading transcripts... ({len(transcripts)} so far)", "step": 2})
 
-            if len(transcripts) >= 10:
+            if len(transcripts) >= 1:
                 break
 
-        transcripts = transcripts[:10]
+        transcripts = transcripts[:1]
 
         if not transcripts:
             yield sse("error", {"message": "No transcripts found for this channel. Captions appear to be disabled. Please try a channel that has captions enabled — most large creators do."})
             return
 
-        if len(transcripts) < 3:
+        if len(transcripts) < 1:
             yield sse("error", {"message": "Not enough usable transcripts found. Please try a channel with more videos."})
             return
 
