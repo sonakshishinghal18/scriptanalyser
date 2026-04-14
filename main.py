@@ -67,7 +67,7 @@ class GenerateRequest(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 def make_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -269,6 +269,8 @@ Return ONLY this JSON:
             print("[generate] got message back", file=sys.stderr)
 
             raw = "".join(b.text for b in message.content if b.type == "text")
+            print(f"[generate] raw length={len(raw)}", file=sys.stderr)
+
             clean = raw.strip()
             if clean.startswith("```"):
                 clean = clean.split("```")[1]
@@ -276,13 +278,17 @@ Return ONLY this JSON:
                     clean = clean[4:]
             clean = clean.strip()
 
+            print(f"[generate] attempting json.loads", file=sys.stderr)
             script = json.loads(clean)
+            print(f"[generate] json parsed OK, sections={len(script.get('sections', []))}", file=sys.stderr)
 
             if not script.get("sections"):
                 yield sse("error", {"message": "Script was generated but is incomplete. Please try again."})
                 return
 
+            print(f"[generate] sending complete SSE", file=sys.stderr)
             yield sse("complete", {"script": script})
+            print(f"[generate] complete SSE sent", file=sys.stderr)
 
         except json.JSONDecodeError as e:
             print(f"[generate] JSON error: {e}", file=sys.stderr)
