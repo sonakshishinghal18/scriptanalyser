@@ -84,41 +84,45 @@ def health():
 async def analyse(req: AnalyseRequest):
     async def generate():
         channel_url = req.channelUrl.strip()
-        handle = ""
 
         yield sse("status", {"message": "Resolving channel...", "step": 1})
         try:
-            video_ids, handle = await get_channel_video_ids(channel_url, max_videos=20)  # fetch 20 as buffer
+            video_ids, handle = await get_channel_video_ids(channel_url, max_videos=20)
             yield sse("status", {"message": f"Found {len(video_ids)} videos. Reading transcripts...", "step": 2})
         except Exception as e:
             yield sse("error", {"message": f"Could not find this channel. Please check the URL and try again. ({e})"})
             return
 
-        # ── FIX 1: Parallel transcript fetching ──────────────────────────
+        # ── Parallel transcript fetching in batches of 5 ─────────────────
         yield sse("status", {"message": "Reading transcripts...", "step": 2})
 
         async def fetch_one(vid):
             text, used_ytdlp = await asyncio.to_thread(fetch_transcript, vid)
             return vid, text, used_ytdlp
 
-        # Fetch all in parallel
-        results = await asyncio.gather(*[fetch_one(vid) for vid in video_ids])
-
         transcripts: list[str] = []
-        ytdlp_triggered = any(used for _, _, used in results)
+        ytdlp_triggered = False
 
-        for vid, text, used_ytdlp in results:
-            if text and len(text.strip()) > 200:  # filter short/empty
-                transcripts.append(text)
+        for i in range(0, len(video_ids), 5):
+            batch = video_ids[i:i+5]
+            results = await asyncio.gather(*[fetch_one(vid) for vid in batch])
+
+            for vid, text, used in results:
+                if used:
+                    ytdlp_triggered = True
+                if text and len(text.strip()) > 200:
+                    transcripts.append(text)
+
             if len(transcripts) >= 10:
-                break  # stop once we have 10 good ones
+                break
+
+        transcripts = transcripts[:10]
 
         if ytdlp_triggered:
             yield sse("status", {"message": f"Processed {len(transcripts)} videos...", "step": 2})
         else:
             yield sse("status", {"message": f"Read {len(transcripts)} transcripts...", "step": 2})
 
-        # Hard stop if no transcripts found
         if not transcripts:
             yield sse("error", {"message": "No transcripts found for this channel. Captions appear to be disabled. Please try a channel that has captions enabled — most large creators do."})
             return
@@ -186,9 +190,12 @@ Return ONLY this exact JSON (no markdown fences):
 
         raw = "".join(b.text for b in message.content if b.type == "text")
         clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
-        analysis = json.loads(clean)
-
-        yield sse("complete", {"analysis": analysis})
+        try:
+            analysis = json.loads(clean)
+            yield sse("complete", {"analysis": analysis})
+        except json.JSONDecodeError:
+            yield sse("error", {"message": "Failed to parse analysis. Please try again."})
+            return
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -241,21 +248,22 @@ Return ONLY this JSON:
 
         client = make_client()
         with client.messages.stream(
-        model=MODEL,
-        max_tokens=4096,
-        system=system,
-        messages=[{"role": "user", "content": prompt}],
-        ) as stream:
+            model=MODEL,
+            max_tokens=4096,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        ) as lm_stream:
             raw = ""
-            for text in stream.text_stream:
+            for text in lm_stream.text_stream:
                 raw += text
-                # Optional: send progress chunks to frontend
                 yield sse("chunk", {"text": text})
 
-        # Once complete, parse and send final structured result
         clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
         try:
             script = json.loads(clean)
+            if not script.get("sections"):
+                yield sse("error", {"message": "Script was generated but is incomplete. Please try again."})
+                return
             yield sse("complete", {"script": script})
         except json.JSONDecodeError:
             yield sse("error", {"message": "Failed to parse script. Please try again."})
