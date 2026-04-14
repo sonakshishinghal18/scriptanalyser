@@ -158,7 +158,7 @@ async def analyse(req: AnalyseRequest):
 
 Using ONLY the transcripts above as your source for voice and style analysis:
 1. Analyse how this creator speaks — their exact words, sentence structures, catchphrases, energy, opening style, argument style, closing style.
-2. Search the web for what topics are currently trending in this creator's niche in {current_year}.
+2. Search the web for what topics are currently trending in this creator's niche in {current_date}.
 3. Suggest 5 video topics that combine their proven content style with current trending topics.
 
 Return ONLY this exact JSON (no markdown fences):
