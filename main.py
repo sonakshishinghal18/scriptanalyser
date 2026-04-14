@@ -318,12 +318,14 @@ Channel context (for awareness only):
 - Country: {channel_meta.get("country", "")}
 """
 
-        yield sse("status", {"message": "Writing your script..."})
+        yield sse("status", {"message": "Researching topic facts..."})
 
         system = (
             "You are a master ghostwriter for YouTube creators. "
             "You write scripts that sound exactly like the creator — their specific words, rhythm, energy, mannerisms. "
             "You have been given real transcript examples of how this creator speaks — study them carefully and mimic every detail. "
+            "You also have access to web search — use it to find verified, current facts about the topic before writing. "
+            "Never fabricate statistics, dates, events, or claims. Only use real sourced information. "
             "Never generic, never corporate. Always valid JSON only, no markdown."
         )
 
@@ -336,6 +338,11 @@ Channel context (for awareness only):
 Writing guide:
 {writing_guide_text}
 {voice_examples_text}
+
+Before writing the script:
+1. Search the web for current, verified facts, statistics, and recent developments about "{req.topic}"
+2. Use ONLY real, sourced facts in the script — never fabricate statistics, dates, events, or claims
+3. Then write the complete script in this creator's voice using those verified facts
 
 Write a complete YouTube script on: "{req.topic}"
 Target: STRICTLY {target["words"]} total — do NOT exceed this. ({target["duration"]}) — {target["detail"]}
@@ -374,6 +381,7 @@ Return ONLY this JSON:
                     max_tokens=max_tokens,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
+                    tools=[{"type": "web_search_20250305", "name": "web_search"}],
                 )
                 print(f"[generate] Claude done, stop_reason={result.stop_reason}", file=sys.stderr)
                 return result
@@ -387,7 +395,10 @@ Return ONLY this JSON:
                 yield sse("error", {"message": "Script was too long to generate. Try a shorter length or simpler topic."})
                 return
 
-            raw = "".join(b.text for b in message.content if b.type == "text")
+            # ── Extract last text block (after web search blocks) ─────────
+            text_blocks = [b.text for b in message.content if b.type == "text"]
+            print(f"[generate] text blocks count: {len(text_blocks)}", file=sys.stderr)
+            raw = text_blocks[-1] if text_blocks else ""
             print(f"[generate] raw length={len(raw)}", file=sys.stderr)
 
             clean = raw.strip()
