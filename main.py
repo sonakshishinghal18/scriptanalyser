@@ -135,7 +135,7 @@ async def analyse(req: AnalyseRequest):
         )
         context = (
             f"Here are transcripts from {len(transcripts)} of this creator's recent videos. "
-            f"These transcripts are your ONLY source of truth — analyse them deeply and exclusively.\n\n"
+            f"These transcripts are your ONLY source of truth for voice and style — analyse them deeply.\n\n"
             f"{transcript_block}"
         )
 
@@ -146,17 +146,16 @@ async def analyse(req: AnalyseRequest):
             "You only use what the creator actually says in their videos — never assumptions, never channel descriptions, never niche stereotypes. "
             "Study their exact vocabulary, sentence length, energy shifts, how they open, how they build arguments, how they close, "
             "their recurring phrases, filler words, humour style, and unique mannerisms. "
+            "You also have access to web search — use it to find what topics are currently trending in this creator's niche in 2026. "
             "Always respond with valid JSON only — no markdown, no preamble."
         )
 
         prompt = f"""{context}
 
-Using ONLY the transcripts above as your source, analyse this creator's voice deeply.
-Focus entirely on how they actually speak — their exact words, sentence structures, catchphrases,
-energy shifts, how they open videos, how they argue points, how they close.
-Do NOT rely on assumptions about their niche, channel name, or anything outside these transcripts.
-
-Suggest 5 video topics that fit their proven content style and audience.
+Using ONLY the transcripts above as your source for voice and style analysis:
+1. Analyse how this creator speaks — their exact words, sentence structures, catchphrases, energy, opening style, argument style, closing style.
+2. Search the web for what topics are currently trending in this creator's niche in 2026.
+3. Suggest 5 video topics that combine their proven content style with current trending topics.
 
 Return ONLY this exact JSON (no markdown fences):
 {{
@@ -168,22 +167,23 @@ Return ONLY this exact JSON (no markdown fences):
   "voice_summary": "2-3 sentences describing exactly how this creator speaks based on the transcripts — their energy, vocabulary level, signature habits",
   "writing_guide": "3-4 specific instructions a ghostwriter must follow to sound exactly like this creator, based on transcript evidence",
   "topics": [
-    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": true }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": false }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": true }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": false }},
-    {{ "title": "compelling title", "reason": "one sentence why it fits their proven content style", "trending": true }}
+    {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": true }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": false }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": true }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": false }},
+    {{ "title": "compelling title", "reason": "one sentence why it fits their style and current trends", "trending": true }}
   ]
 }}"""
 
         try:
             def call_claude_analyse():
-                print("[analyse] calling Claude...", file=sys.stderr)
+                print("[analyse] calling Claude with web search...", file=sys.stderr)
                 result = make_client().messages.create(
                     model=MODEL,
-                    max_tokens=1500,
+                    max_tokens=2000,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
+                    tools=[{"type": "web_search_20250305", "name": "web_search"}],
                 )
                 print(f"[analyse] Claude done, stop_reason={result.stop_reason}", file=sys.stderr)
                 return result
