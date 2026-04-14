@@ -93,7 +93,7 @@ async def analyse(req: AnalyseRequest):
 
         yield sse("status", {"message": "Resolving channel...", "step": 1})
         try:
-            video_ids, handle = await get_channel_video_ids(channel_url, max_videos=2)
+            video_ids, handle = await get_channel_video_ids(channel_url, max_videos=10)
             yield sse("status", {"message": f"Found {len(video_ids)} videos. Reading transcripts...", "step": 2})
         except Exception as e:
             yield sse("error", {"message": f"Could not find this channel. Please check the URL and try again. ({e})"})
@@ -108,8 +108,8 @@ async def analyse(req: AnalyseRequest):
         transcripts: list[str] = []
         ytdlp_triggered = False
 
-        for i in range(0, len(video_ids), 2):
-            batch = video_ids[i:i+2]
+        for i in range(0, len(video_ids), 3):
+            batch = video_ids[i:i+3]
             results = await asyncio.gather(*[fetch_one(vid) for vid in batch])
 
             for vid, text, used in results:
@@ -120,10 +120,10 @@ async def analyse(req: AnalyseRequest):
 
             yield sse("status", {"message": f"Reading transcripts... ({len(transcripts)} so far)", "step": 2})
 
-            if len(transcripts) >= 1:
+            if len(transcripts) >= 8:
                 break
 
-        transcripts = transcripts[:1]
+        transcripts = transcripts[:8]
 
         if not transcripts:
             yield sse("error", {"message": "No transcripts found for this channel. Captions appear to be disabled. Please try a channel that has captions enabled — most large creators do."})
