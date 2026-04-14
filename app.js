@@ -36,14 +36,12 @@ async function readSSE(response, onStatus) {
   const reader = response.body.getReader();
   const dec = new TextDecoder();
   let buf = '', result = null;
-
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buf += dec.decode(value, { stream: true });
     const lines = buf.split('\n');
     buf = lines.pop();
-
     let evt = null, data = null;
     for (const line of lines) {
       if (line.startsWith('event: ')) { evt = line.slice(7).trim(); data = null; }
@@ -51,9 +49,11 @@ async function readSSE(response, onStatus) {
         try { data = JSON.parse(line.slice(6)); } catch (_) {}
       }
       if (evt && data !== null) {
-        if (evt === 'status'   && onStatus) onStatus(data.message, data.step);
+        if (evt === 'status')   onStatus && onStatus(data.message, data.step);
         if (evt === 'complete') result = data;
-        if (evt === 'error')   throw new Error(data.message || 'Server error');
+        if (evt === 'warning')  onStatus && onStatus(data.message, null);
+        if (evt === 'chunk')    {} // ignored, streaming handled separately
+        if (evt === 'error')    throw new Error(data.message || 'Server error');
         evt = null; data = null;
       }
     }
