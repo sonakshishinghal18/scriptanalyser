@@ -30,7 +30,7 @@ def extract_handle(url: str) -> str:
     return url.rstrip("/").split("/")[-1]
 
 
-async def get_channel_video_ids(channel_url: str, max_videos: int = 2) -> tuple[list[str], str]:
+async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple[list[str], str]:
     handle = extract_handle(channel_url)
     youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
