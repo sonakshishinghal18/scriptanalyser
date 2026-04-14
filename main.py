@@ -72,6 +72,11 @@ def sse(event: str, data: dict) -> str:
 def make_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
+SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+    "Connection": "keep-alive",
+}
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -121,10 +126,6 @@ async def analyse(req: AnalyseRequest):
 
         if not transcripts:
             yield sse("error", {"message": "No transcripts found for this channel. Captions appear to be disabled. Please try a channel that has captions enabled — most large creators do."})
-            return
-
-        if len(transcripts) < 1:
-            yield sse("error", {"message": "Not enough usable transcripts found. Please try a channel with more videos."})
             return
 
         yield sse("status", {"message": f"Read {len(transcripts)} transcripts. Analysing voice...", "step": 3})
@@ -203,7 +204,7 @@ Return ONLY this exact JSON (no markdown fences):
         except Exception as e:
             yield sse("error", {"message": f"Analysis failed: {str(e)}"})
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @app.post("/api/generate")
@@ -297,4 +298,4 @@ Return ONLY this JSON:
             print(f"[generate] exception: {e}", file=sys.stderr)
             yield sse("error", {"message": f"Script generation failed: {str(e)}"})
 
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    return StreamingResponse(stream(), media_type="text/event-stream", headers=SSE_HEADERS)
