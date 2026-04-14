@@ -142,7 +142,7 @@ async def analyse(req: AnalyseRequest):
 
         yield sse("status", {"message": "Finding trending topics in your niche...", "step": 4})
 
-        current_year = datetime.now().year
+        current_date = datetime.now().strftime("%B %d, %Y")
 
         system = (
             "You are an expert content strategist who analyses YouTube creators exclusively from their transcripts. "
