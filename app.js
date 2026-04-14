@@ -52,7 +52,8 @@ async function readSSE(response, onStatus) {
         if (evt === 'status')   onStatus && onStatus(data.message, data.step);
         if (evt === 'complete') result = data;
         if (evt === 'warning')  onStatus && onStatus(data.message, null);
-        if (evt === 'chunk')    {} // ignored, streaming handled separately
+        if (evt === 'chunk')    {} // ignored
+        if (evt === 'ping')     {} // keepalive — ignored
         if (evt === 'error')    throw new Error(data.message || 'Server error');
         evt = null; data = null;
       }
@@ -102,9 +103,17 @@ async function runAnalysis() {
   setAnalyseStep(1);
   $('analyse-error').classList.add('hidden');
 
-  // Timeout controller — 3 minutes max
+  // Timeout — 5 minutes max
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3 * 60 * 1000);
+  const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
+  // Wake lock — prevents screen from sleeping and dropping connection
+  let wakeLock = null;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+  } catch (_) {
+    // Wake lock not supported — not critical, continue anyway
+  }
 
   try {
     const res = await fetch(`${API}/api/analyse`, {
@@ -116,17 +125,12 @@ async function runAnalysis() {
 
     if (!res.ok) throw new Error(`Server error ${res.status}`);
 
-    const data = await readSSE(res, (msg, type) => {
-    if (type === 'chunk') {
-      // Show live typing progress
-      $('generate-status').textContent = 'Writing your script...';
-    }
-    if (type === 'status') {
-      $('generate-status').textContent = msg;
-    }
-  });
+    // ✅ Fixed: was updating generate-status instead of analyse-status
+    const data = await readSSE(res, (msg, step) => {
+      $('analyse-status').textContent = msg;
+      if (step) setAnalyseStep(step);
+    });
 
-    // Validate we actually got analysis data back
     if (!data || !data.analysis) {
       throw new Error('No analysis data received. Please try again.');
     }
@@ -138,7 +142,6 @@ async function runAnalysis() {
     showPage('topics');
 
   } catch (err) {
-    // User-friendly error messages
     let msg = 'Something went wrong. Please try again.';
     if (err.name === 'AbortError') {
       msg = 'This is taking too long. Please try again or use a channel with fewer videos.';
@@ -151,10 +154,13 @@ async function runAnalysis() {
     }
     $('analyse-error-msg').textContent = msg;
     $('analyse-error').classList.remove('hidden');
+
   } finally {
     clearTimeout(timeout);
+    if (wakeLock) wakeLock.release();
   }
 }
+
 $('analyse-back-btn').addEventListener('click', () => showPage('landing'));
 
 /* ═══════════════════════════════════════════════════════════
@@ -245,9 +251,17 @@ $('generate-btn').addEventListener('click', async () => {
    GENERATE PAGE
 ═══════════════════════════════════════════════════════════ */
 async function runGenerate() {
-  // Timeout — 2 minutes max
+  // Timeout — 5 minutes max
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2 * 60 * 1000);
+  const timeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
+  // Wake lock — prevents screen from sleeping and dropping connection
+  let wakeLock = null;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+  } catch (_) {
+    // Wake lock not supported — not critical, continue anyway
+  }
 
   try {
     const res = await fetch(`${API}/api/generate`, {
@@ -263,27 +277,21 @@ async function runGenerate() {
 
     if (!res.ok) throw new Error(`Server error ${res.status}`);
 
-    // Stream the script word by word as it arrives
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let script = '';
+    const data = await readSSE(res, (msg, step) => {
+      $('generate-status').textContent = msg;
+    });
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      script += decoder.decode(value, { stream: true });
-
-      // Update UI in real time as chunks arrive
-      setState(prev => ({ ...prev, script, isStreaming: true }));
-    }
-
-    // Validate final result
-    if (!script || script.trim().length < 50) {
+    if (!data || !data.script) {
       throw new Error("Couldn't generate a script — please try a different topic.");
     }
 
-    setState(prev => ({ ...prev, script, isStreaming: false }));
+    if (!data.script.sections || data.script.sections.length === 0) {
+      throw new Error("Script was generated but is incomplete. Please try again.");
+    }
+
+    state.script = data.script;
+    renderScriptPage(data.script);
+    showPage('script');
 
   } catch (err) {
     let msg = 'Something went wrong. Please try again.';
@@ -296,11 +304,15 @@ async function runGenerate() {
     } else {
       msg = err.message;
     }
-    setState(prev => ({ ...prev, error: msg, isStreaming: false }));
+    $('generate-error-msg').textContent = msg;
+    $('generate-error').classList.remove('hidden');
+
   } finally {
     clearTimeout(timeout);
+    if (wakeLock) wakeLock.release();
   }
 }
+
 /* ═══════════════════════════════════════════════════════════
    SCRIPT PAGE
 ═══════════════════════════════════════════════════════════ */
