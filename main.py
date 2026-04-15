@@ -165,6 +165,7 @@ Channel context (use for background awareness ONLY — do NOT use for voice/styl
 
         yield sse("status", {"message": "Analysing voice and finding topics...", "step": 4})
 
+        # ── CHANGE 1: Added language identification instruction to system prompt ──
         system = (
             "You are an expert content strategist who analyses YouTube creators exclusively from their transcripts. "
             "You only use what the creator actually says in their videos — never assumptions, never channel descriptions, never niche stereotypes. "
@@ -172,9 +173,11 @@ Channel context (use for background awareness ONLY — do NOT use for voice/styl
             "their recurring phrases, filler words, humour style, and unique mannerisms. "
             "You are also given channel metadata (subscribers, description, country etc.) — use this for CONTEXT ONLY "
             "to inform topic relevance, audience size awareness, and cultural references. Never use it for voice analysis. "
+            "Identify the primary language the creator uses in their transcripts and preserve it exactly. "
             "Always respond with valid JSON only — no markdown, no preamble."
         )
 
+        # ── CHANGE 2: Added "primary_language" field to the JSON schema ──
         prompt = f"""{context}
 
 Using the transcripts above as your ONLY source for voice and style analysis,
@@ -191,6 +194,7 @@ Return ONLY this exact JSON (no markdown fences):
   "tone": "single word",
   "avg_video_length": "e.g. 12 min",
   "posting_pattern": "e.g. Weekly",
+  "primary_language": "the primary language this creator speaks in — e.g. Hindi, English, Hinglish, Tamil. Be specific and accurate based on the transcripts.",
   "style_tags": ["tag1", "tag2", "tag3", "tag4"],
   "voice_summary": "2-3 sentences describing exactly how this creator speaks based on the transcripts — their energy, vocabulary level, signature habits",
   "writing_guide": {{
@@ -314,12 +318,16 @@ Channel context (for awareness only):
 
         yield sse("status", {"message": "Researching topic facts..."})
 
+        # ── CHANGE 3: Added language instruction to generate system prompt and prompt ──
         system = (
             "You are a master ghostwriter for YouTube creators. "
             "You write scripts that sound exactly like the creator — their specific words, rhythm, energy, mannerisms. "
             "You have been given real transcript examples of how this creator speaks — study them carefully and mimic every detail. "
             "You also have access to web search — use it to find verified, current facts about the topic before writing. "
             "Never fabricate statistics, dates, events, or claims. Only use real sourced information. "
+            "Write the entire script in the creator's primary language as identified in their profile. "
+            "If the language is Hindi, write in Hindi script. If Hinglish, mirror the exact Hindi-English mix from the voice examples. "
+            "Never switch languages or default to English unless the creator's primary language is English. "
             "Never generic, never corporate. Always valid JSON only, no markdown."
         )
 
@@ -328,6 +336,7 @@ Channel context (for awareness only):
 - Tone: {a.get("tone")}
 - Style tags: {", ".join(a.get("style_tags", []))}
 - Voice summary: {a.get("voice_summary")}
+- Primary language: {a.get("primary_language", "match the creator's transcript language")}
 {channel_context}
 Writing guide:
 {writing_guide_text}
@@ -345,6 +354,7 @@ IMPORTANT: Count your words. Stay within the word limit. It is better to be slig
 Follow the writing guide strictly. Use the real voice examples above as your style template.
 Sound EXACTLY like this creator — use their vocabulary, their sentence rhythm, their energy,
 their signature phrases, their filler words. No generic YouTube-speak. No filler phrases.
+Write entirely in the creator's primary language: {a.get("primary_language", "match the creator's transcript language")}.
 
 Return ONLY this JSON:
 {{
