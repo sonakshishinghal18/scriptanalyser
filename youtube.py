@@ -28,7 +28,79 @@ def extract_handle(url: str) -> str:
     return url.rstrip("/").split("/")[-1]
 
 
-async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple[list[str], str, dict]:
+def sample_transcript(text: str, max_chars: int = 6000) -> str:
+    """
+    Sample from beginning, middle, and end of a transcript
+    instead of just truncating from the start.
+
+    Distribution:
+      - 40% from the beginning  (hook, intro, early style)
+      - 35% from the middle     (argument style, explanations)
+      - 25% from the end        (closing style, CTA, sign-off)
+
+    Each chunk is taken as a contiguous block so the voice
+    reads naturally within each section.
+
+    Explicit section headers are added so the LLM knows these are
+    non-contiguous excerpts for voice analysis only — not a continuous
+    script to be reproduced or confused during generation.
+    """
+    total = len(text)
+
+    # If transcript fits entirely, wrap in a single section header and return
+    if total <= max_chars:
+        return (
+            "[TRANSCRIPT EXCERPT — OPENING/FULL]\n"
+            f"{text}\n"
+            "[END OF EXCERPT]"
+        )
+
+    begin_chars  = int(max_chars * 0.40)
+    middle_chars = int(max_chars * 0.35)
+    end_chars    = max_chars - begin_chars - middle_chars  # remaining ~25%
+
+    # Beginning: first N chars
+    beginning = text[:begin_chars]
+
+    # Middle: centred around the midpoint
+    mid        = total // 2
+    mid_start  = max(begin_chars, mid - middle_chars // 2)
+    mid_end    = mid_start + middle_chars
+    # Guard against overlap with end section
+    if mid_end > total - end_chars:
+        mid_end   = total - end_chars
+        mid_start = max(begin_chars, mid_end - middle_chars)
+    middle = text[mid_start:mid_end]
+
+    # End: last N chars
+    end = text[total - end_chars:]
+
+    sampled = (
+        "[TRANSCRIPT EXCERPT — OPENING (first ~40% of budget) — "
+        "use to analyse: hook style, intro pattern, early energy]\n"
+        f"{beginning}\n"
+        "[END OF OPENING EXCERPT]\n\n"
+
+        "[TRANSCRIPT EXCERPT — MID-VIDEO (middle ~35% of budget) — "
+        "use to analyse: argument style, explanation patterns, transitions, energy mid-video]\n"
+        f"{middle}\n"
+        "[END OF MID-VIDEO EXCERPT]\n\n"
+
+        "[TRANSCRIPT EXCERPT — CLOSING (final ~25% of budget) — "
+        "use to analyse: closing style, sign-off, CTA pattern, final energy]\n"
+        f"{end}\n"
+        "[END OF CLOSING EXCERPT]"
+    )
+
+    print(
+        f"[transcript] sampled {begin_chars}+{middle_chars}+{end_chars} chars "
+        f"from {total} total",
+        file=sys.stderr,
+    )
+    return sampled
+
+
+async def get_channel_video_ids(channel_url: str, max_videos: int = 8) -> tuple[list[str], str, dict]:
     handle = extract_handle(channel_url)
     youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
 
@@ -74,15 +146,15 @@ async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple
         raise ValueError(f"Channel not found: {channel_id}")
 
     channel_item = ch_res["items"][0]
-    snippet = channel_item.get("snippet", {})
-    statistics = channel_item.get("statistics", {})
+    snippet      = channel_item.get("snippet", {})
+    statistics   = channel_item.get("statistics", {})
 
     # ── Build metadata dict ───────────────────────────────────────────────
     channel_metadata = {
         "title":            snippet.get("title", ""),
         "description":      snippet.get("description", ""),
         "country":          snippet.get("country", ""),
-        "joined":           snippet.get("publishedAt", "")[:10],  # "2009-11-08"
+        "joined":           snippet.get("publishedAt", "")[:10],
         "subscriber_count": statistics.get("subscriberCount", ""),
         "video_count":      statistics.get("videoCount", ""),
         "view_count":       statistics.get("viewCount", ""),
@@ -111,7 +183,7 @@ async def get_channel_video_ids(channel_url: str, max_videos: int = 10) -> tuple
     return video_ids, handle, channel_metadata
 
 
-def fetch_transcript(video_id: str, max_chars: int = 3000) -> tuple[str | None, bool]:
+def fetch_transcript(video_id: str, max_chars: int = 6000) -> tuple[str | None, bool]:
     try:
         if SCRAPER_API_KEY:
             proxy_url = f"http://scraperapi:{SCRAPER_API_KEY}@proxy-server.scraperapi.com:8001"
@@ -127,7 +199,9 @@ def fetch_transcript(video_id: str, max_chars: int = 3000) -> tuple[str | None, 
 
         if text.strip():
             print(f"[transcript] {video_id} OK ({len(text)} chars)", file=sys.stderr)
-            return text[:max_chars], False
+            # ── Sample across the full transcript instead of head-truncating ──
+            sampled = sample_transcript(text, max_chars=max_chars)
+            return sampled, False
 
     except (TranscriptsDisabled, NoTranscriptFound) as e:
         print(f"[transcript] {video_id} no captions: {e}", file=sys.stderr)
