@@ -227,7 +227,7 @@ Return ONLY this exact JSON (no markdown fences):
                 print("[analyse] calling Claude...", file=sys.stderr)
                 result = make_client().messages.create(
                     model=MODEL_ANALYSE,
-                    max_tokens=5000,
+                    max_tokens=6500,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
                 )
