@@ -25,6 +25,7 @@ app = FastAPI(title="ScriptForge API")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 MODEL = "claude-sonnet-4-5"
+MODEL_ANALYSE = "claude-haiku-4-5-20251001"
 
 app.add_middleware(
     CORSMiddleware,
@@ -225,8 +226,8 @@ Return ONLY this exact JSON (no markdown fences):
             def call_claude_analyse():
                 print("[analyse] calling Claude...", file=sys.stderr)
                 result = make_client().messages.create(
-                    model=MODEL,
-                    max_tokens=3000,
+                    model=MODEL_ANALYSE,
+                    max_tokens=5000,
                     system=system,
                     messages=[{"role": "user", "content": prompt}],
                 )
