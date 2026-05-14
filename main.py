@@ -373,9 +373,9 @@ Return ONLY this JSON:
         try:
             # ── Dynamic max_tokens based on script length ─────────────────
             token_map = {
-                "short":  3000,
-                "medium": 5000,
-                "long":   7000,
+                "short":  4000,
+                "medium": 6000,
+                "long":   8000,
             }
             max_tokens = token_map.get(req.length, 5000)
 
